@@ -1,5 +1,5 @@
-# VulkanWindow
-An example vulkan window project.
+### VulkanWindow
+An example vulkan window project, using GLFW and the Vulkan SDK.
 
 ### Dependencies:
 ![GLFW](https://www.glfw.org/)
