@@ -2,6 +2,12 @@
 An example vulkan window project, using GLFW and the Vulkan SDK.
 
 ### Dependencies:
-![GLFW](https://www.glfw.org/) is an Open Source, multi-platform library for OpenGL, OpenGL ES and Vulkan development on the desktop.  
+gcc and g++ compilers.
 
-![Vulkan](https://vulkan.lunarg.com) is a low-overhead, cross-platform API, open standard for 3D graphics and computing.  
+![CMake](https://cmake.org/) is an open-source, cross-platform family of tools designed to build, test and package software.
+
+![imgui](https://github.com/ocornut/imgui) is a bloat-free Graphical User interface for C++ with minimal dependencies.
+
+![GLFW](https://github.com/glfw/glfw) is a multi-platform library for OpenGL, OpenGL ES, Vulkan, window and input.
+
+![Vulkan](https://www.vulkan.org/) is a low-overhead, cross-platform API, open standard for 3D graphics and computing.  
