@@ -1,54 +1,38 @@
-# Minimum cmake version
-cmake_minimum_required(VERSION "3.26.3")
+cmake_minimum_required(VERSION 3.15)
+project(VulkanWindow C CXX)
 
-# Compiler options
-set(CMAKE_C_COMPILER gcc)
-set(CMAKE_CXX_COMPILER g++)
+set(src_dir ${PROJECT_SOURCE_DIR}/source)
 set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Compile library
-project(VulkanWindow)
-
-# Setting source directory
-set(SRC_DIR "${PROJECT_SOURCE_DIR}/source")
-
-# Fetch dependencies
-include(scripts/imgui.cmake)
-include(scripts/glfw.cmake)
-
-# Locate the vulkan package
 find_package(Vulkan REQUIRED)
 
-# Get files
-file(GLOB_RECURSE SRC_MAIN
-    "${SRC_DIR}/**.hpp"
-    "${SRC_DIR}/**.h"
-    "${SRC_DIR}/**.cpp"
+include(scripts/glfw.cmake)
+include(scripts/imgui.cmake)
+
+file(GLOB_RECURSE src_main
+    ${src_dir}/*.hpp
+    ${src_dir}/*.h
+    ${src_dir}/*.cpp
 )
 
-# Define library target
-add_executable(VulkanWindow "${SRC_MAIN}")
+add_executable(VulkanWindow ${src_main}
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+    ${imgui_SOURCE_DIR}/imgui.cpp
+    ${imgui_SOURCE_DIR}/imgui_draw.cpp
+    ${imgui_SOURCE_DIR}/imgui_demo.cpp
+    ${imgui_SOURCE_DIR}/imgui_tables.cpp
+    ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+)
 
-# Target include directories
 target_include_directories(VulkanWindow PRIVATE
-    "${SRC_DIR}"
-    "${Vulkan_INCLUDE_DIRS}"
-    "${imgui_SOURCE_DIR}"
-    "${glfw_SOURCE_DIR}"
+    ${src_dir}
+    ${glfw_SOURCE_DIR}/include
+    ${imgui_SOURCE_DIR}
+    ${Vulkan_INCLUDE_DIRS}
 )
 
-# Target precompile headers
-# target_precompile_headers(VulkanWindow PRIVATE "${SRC_DIR}/common.hpp")
-
-# Target link libraries
-target_link_libraries(VulkanWindow PRIVATE imgui glfw)
-
-# Add compile definitions
-if (WIN32)
-    add_compile_definitions(VulkanWindow 
-    "_CRT_SECURE_NO_WARNINGS"
-    "NOMINMAX"
-    "WIN32_LEAN_AND_MEAN"
-    )
-endif()
+target_link_libraries(VulkanWindow PUBLIC
+    glfw
+    Vulkan::Vulkan
+)
