@@ -37,7 +37,9 @@ static void glfw_error_callback(int error, const char* description) {
 static void check_vk_result(VkResult err) {
     if (err == 0)
         return;
+        
     fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+
     if (err < 0)
         abort();
 }
@@ -171,7 +173,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
 #endif
 
         const float queue_priority[] = { 1.0f };
-        
+
         VkDeviceQueueCreateInfo queue_info[1] = {};
         queue_info[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
         queue_info[0].queueFamilyIndex = g_QueueFamily;
@@ -398,6 +400,7 @@ int main(int, char**) {
     ImGui::StyleColorsDark();
 
     ImGui_ImplGlfw_InitForVulkan(window, true);
+
     ImGui_ImplVulkan_InitInfo init_info = {};
     init_info.Instance = g_Instance;
     init_info.PhysicalDevice = g_PhysicalDevice;
@@ -412,6 +415,7 @@ int main(int, char**) {
     init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
     init_info.Allocator = g_Allocator;
     init_info.CheckVkResultFn = check_vk_result;
+
     ImGui_ImplVulkan_Init(&init_info, wd->RenderPass);
 
     {
@@ -443,6 +447,7 @@ int main(int, char**) {
 
         err = vkDeviceWaitIdle(g_Device);
         check_vk_result(err);
+
         ImGui_ImplVulkan_DestroyFontUploadObjects();
     }
 
@@ -468,7 +473,6 @@ int main(int, char**) {
         ImGui::NewFrame();
 
         {
-            ImGui::SetNextWindowSize(ImVec2(400, 200));
             ImGui::Begin("Hello, world!");
             ImGui::End();
         }
