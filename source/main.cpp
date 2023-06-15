@@ -22,15 +22,16 @@
   SOFTWARE.
 */
 
-#include <imgui.h>
-#include <backends/imgui_impl_glfw.h>
-#include <backends/imgui_impl_vulkan.h>
-#include <stdio.h>
-#include <stdlib.h>
 #define GLFW_INCLUDE_NONE
 #define GLFW_INCLUDE_VULKAN
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+
+#include <stdio.h>
+#include <stdlib.h>
 
 #if defined(_MSC_VER) && (_MSC_VER >= 1900) && !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
 #pragma comment(lib, "legacy_stdio_definitions")
@@ -78,13 +79,24 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debug_report(
   const char* pLayerPrefix,
   const char* pMessage,
   void* pUserData) {
-    (void)flags; (void)object; (void)location; (void)messageCode; (void)pUserData; (void)pLayerPrefix;
-    fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n", objectType, pMessage);
+    (void)flags;
+    (void)object;
+    (void)location;
+    (void)messageCode;
+    (void)pUserData;
+    (void)pLayerPrefix;
+    fprintf(
+      stderr,
+      "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n",
+      objectType,
+      pMessage);
     return VK_FALSE;
 }
 #endif
 
-static bool IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties, const char* extension) {
+static bool IsExtensionAvailable(
+  const ImVector<VkExtensionProperties>& properties,
+  const char* extension) {
   for (const VkExtensionProperties& p : properties)
     if (strcmp(p.extensionName, extension) == 0)
       return true;
@@ -406,7 +418,12 @@ int main(int, char**) {
     return 1;
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  GLFWwindow* window = glfwCreateWindow(800, 600, "Vulkan window example", nullptr, nullptr);
+  GLFWwindow* window = glfwCreateWindow(
+    800,
+    600,
+    "Vulkan window example",
+    nullptr,
+    nullptr);
 
   if (!glfwVulkanSupported()) {
     printf("GLFW: Vulkan Not Supported\n");
@@ -424,7 +441,11 @@ int main(int, char**) {
 
   VkSurfaceKHR surface;
 
-  VkResult err = glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface);
+  VkResult err = glfwCreateWindowSurface(
+    g_Instance,
+    window,
+    g_Allocator,
+    &surface);
   check_vk_result(err);
 
   int w, h;
