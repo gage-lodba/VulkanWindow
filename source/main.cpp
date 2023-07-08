@@ -553,10 +553,8 @@ int main(int, char**) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    {
-      ImGui::Begin("Hello, world!");
-      ImGui::End();
-    }
+    ImGui::Begin("Hello, world!");
+    ImGui::End();
 
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
