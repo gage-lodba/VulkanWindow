@@ -1,6 +1,9 @@
 ### VulkanWindow
 An example vulkan window project, using GLFW and the Vulkan SDK.
 
+### Tested platforms
+Tested to work on both windows and linux.
+
 ### Dependencies:
 gcc and g++ compilers.
 
