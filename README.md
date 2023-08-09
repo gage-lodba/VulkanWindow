@@ -7,7 +7,7 @@ Tested to work on both windows and linux.
 ### Dependencies:
 gcc and g++ compilers.
 
-![CMake](https://cmake.org/) is an open-source, cross-platform family of tools designed to build, test and package software.
+[![CMake](https://img.shields.io/badge/CMake-blue?style=for-the-badge&logo=cmake&logoColor=%23064F8C)](https://cmake.org/) is an open-source, cross-platform family of tools designed to build, test and package software.
 
 ![imgui](https://github.com/ocornut/imgui) is a bloat-free Graphical User interface for C++ with minimal dependencies.
 
