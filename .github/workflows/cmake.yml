@@ -25,9 +25,15 @@ jobs:
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
+            run: |
+              sudo apt update
+              sudo apt install -y libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxinerama-dev libxcursor-dev libxi-dev
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
+            run: |
+              sudo apt update
+              sudo apt install -y libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxinerama-dev libxcursor-dev libxi-dev
         exclude:
           - os: windows-latest
             c_compiler: gcc
