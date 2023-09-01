@@ -8,7 +8,7 @@ on:
 
 jobs:
   build:
-    name: Build Releases
+    name: Build Release
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -43,6 +43,13 @@ jobs:
       run: |
         sudo apt update
         sudo apt install -y libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxinerama-dev libxcursor-dev libxi-dev
+
+    - if: ${{matrix.os}} == "windows-latest"
+      uses: humbletim/setup-vulkan-sdk@v1.2.0
+      with:
+        vulkan-query-version: 1.3.204.0
+        vulkan-components: Vulkan-Headers, Vulkan-Loader
+        vulkan-use-cache: true
 
     - name: Set reusable strings
       id: strings
