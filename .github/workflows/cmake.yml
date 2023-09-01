@@ -26,7 +26,6 @@ jobs:
     - if: ${{ matrix.os == 'windows-latest' }}
       name: Windows packages
       run: |
-        choco upgrade all
         choco install vulkan-sdk
 
     - name: Set reusable strings
