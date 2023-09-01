@@ -17,19 +17,6 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         build_type: [Release]
-        c_compiler: [gcc, cl]
-        include:
-          - os: windows-latest
-            c_compiler: cl
-            cpp_compiler: cl
-          - os: ubuntu-latest
-            c_compiler: gcc
-            cpp_compiler: g++
-        exclude:
-          - os: windows-latest
-            c_compiler: gcc
-          - os: ubuntu-latest
-            c_compiler: cl
 
     steps:
     - uses: actions/checkout@v3
@@ -45,6 +32,11 @@ jobs:
         vulkan-query-version: 1.3.204.0
         vulkan-components: Vulkan-Headers, Vulkan-Loader
         vulkan-use-cache: true
+    
+    - if: ${{ matrix.os == 'windows-latest' }}
+      uses: egor-tensin/setup-mingw@v2
+      with:
+        platform: x64
 
     - name: Set reusable strings
       id: strings
@@ -55,8 +47,8 @@ jobs:
     - name: Configure CMake
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
-        -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
+        -DCMAKE_CXX_COMPILER=g++
+        -DCMAKE_C_COMPILER=gcc
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -S ${{ github.workspace }}
 
