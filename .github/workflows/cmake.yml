@@ -38,6 +38,10 @@ jobs:
       with:
         platform: x64
 
+    - name: Chocolatey Test
+      if: ${{ matrix.os == 'windows-latest' }}
+      run: choco.exe -h
+
     - name: Set reusable strings
       id: strings
       shell: bash
@@ -47,10 +51,12 @@ jobs:
     - name: Configure CMake
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_CXX_COMPILER=g++
-        -DCMAKE_C_COMPILER=gcc
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
         -S ${{ github.workspace }}
+      shell: bash
+      env:
+        CC: gcc
+        CXX: g++
 
     - name: Build
       run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
