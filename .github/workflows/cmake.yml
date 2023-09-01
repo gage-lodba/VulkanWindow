@@ -71,7 +71,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.os }}
-        path: build/VulkanWindow
+        path: build/VulkanWindow*
 
   release:
     name: Release
