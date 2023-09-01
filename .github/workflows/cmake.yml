@@ -17,7 +17,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         build_type: [Release]
-        c_compiler: [gcc, clang, cl]
+        c_compiler: [gcc, cl]
         include:
           - os: windows-latest
             c_compiler: cl
@@ -25,14 +25,9 @@ jobs:
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
-          - os: ubuntu-latest
-            c_compiler: clang
-            cpp_compiler: clang++
         exclude:
           - os: windows-latest
             c_compiler: gcc
-          - os: windows-latest
-            c_compiler: clang
           - os: ubuntu-latest
             c_compiler: cl
 
@@ -75,7 +70,7 @@ jobs:
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
       with:
-        name: binary
+        name: ${{ matrix.os }}
         path: build/VulkanWindow
 
   release:
@@ -86,10 +81,15 @@ jobs:
     steps:
     - uses: actions/checkout@v3
             
-    - name: Download Artifact
+    - name: Download Linux Artifact
       uses: actions/download-artifact@v3
       with:
-        name: binary
+        name: ubuntu-latest
+
+    - name: Download Windows Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: windows-latest
       
     - name: Release Build
       uses: softprops/action-gh-release@v1
