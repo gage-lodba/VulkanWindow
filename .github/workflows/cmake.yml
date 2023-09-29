@@ -12,18 +12,23 @@ jobs:
 
       matrix:
         os: [ubuntu-latest, windows-latest]
+        include:
+          - os: windows-latest
+            path: ${{ github.workspace }}\\build
+          - os: ubuntu-latest
+            path: ${{ github.workspace }}/build
 
     steps:
     - uses: actions/checkout@v3
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
-      name: Linux packages
+      name: Update packages
       run: |
         sudo apt update
         sudo apt install -y libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxinerama-dev libxcursor-dev libxi-dev
 
     - if: ${{ matrix.os == 'windows-latest' }}
-      name: Prepare Vulkan SDK
+      name: Install Vulkan SDK
       uses: humbletim/setup-vulkan-sdk@v1.2.0
       with:
         vulkan-query-version: 1.3.204.0
@@ -32,7 +37,7 @@ jobs:
 
     - name: Configure CMake
       run: >
-        cmake -B build
+        cmake -B ${{ matrix.path }}
         -DCMAKE_BUILD_TYPE=Release
         -S ${{ github.workspace }}
       shell: bash
@@ -41,10 +46,10 @@ jobs:
         CXX: g++
 
     - name: Build
-      run: cmake --build build --config Release
+      run: cmake --build ${{ matrix.path }} --config Release
 
     # - name: Test
-    #   working-directory: ${{ github.workspace }}/build
+    #   working-directory: ${{ matrix.path }}
     #   run: ctest --build-config Release
 
     - name: Upload Artifact
