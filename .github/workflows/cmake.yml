@@ -22,7 +22,10 @@ jobs:
     - uses: actions/checkout@v3
 
     - name: Path
-      run: echo ${{ github.workspace }}
+      run: |
+        echo "$GITHUB_WORKSPACE"
+        echo "$GITHUB_WORKSPACE/build"
+        echo "$GITHUB_WORKSPACE\\build"
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Update packages
@@ -42,7 +45,7 @@ jobs:
       run: >
         cmake -B build
         -DCMAKE_BUILD_TYPE=Release
-        -S ${{ github.workspace }}
+        -S "$GITHUB_WORKSPACE"
       shell: bash
       env:
         CC: gcc
