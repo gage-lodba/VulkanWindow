@@ -12,7 +12,6 @@ jobs:
 
       matrix:
         os: [ubuntu-latest, windows-latest]
-        build_type: [Release]
 
     steps:
     - uses: actions/checkout@v3
@@ -37,16 +36,10 @@ jobs:
         g++ --version
         gcc --version
 
-    - name: Set reusable strings
-      id: strings
-      shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
-
     - name: Configure CMake
       run: >
-        cmake -B ${{ steps.strings.outputs.build-output-dir }}
-        -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        cmake -B ${{ github.workspace }}/build
+        -DCMAKE_BUILD_TYPE=Release
         -S ${{ github.workspace }}
       shell: bash
       env:
@@ -54,11 +47,11 @@ jobs:
         CXX: g++
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }}
+      run: cmake --build ${{ github.workspace }}/build --config Release
 
     - name: Test
-      working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config ${{ matrix.build_type }}
+      working-directory: ${{ github.workspace }}/build
+      run: ctest --build-config Release
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v3
