@@ -12,11 +12,6 @@ jobs:
 
       matrix:
         os: [ubuntu-latest, windows-latest]
-        # include:
-        #   - os: windows-latest
-        #     path: ${{ github.workspace }}\\build
-        #   - os: ubuntu-latest
-        #     path: ${{ github.workspace }}/build
 
     steps:
     - uses: actions/checkout@v3
@@ -55,7 +50,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.os }}
-        path: build/VulkanWindow*
+        path: build/*VulkanWindow*
 
   release:
     name: Release
