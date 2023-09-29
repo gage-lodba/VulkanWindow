@@ -50,7 +50,7 @@ jobs:
       uses: actions/upload-artifact@v3
       with:
         name: ${{ matrix.os }}
-        path: build/*VulkanWindow*
+        path: build/**/VulkanWindow*
 
   release:
     name: Release
@@ -73,7 +73,7 @@ jobs:
     - name: Release Build
       uses: softprops/action-gh-release@v1
       with:
-        name: ${{ github.run_id }}
+        name: Release
         tag_name: ${{ github.run_id }}
         body: |
           **This release has been built by Github Actions**
