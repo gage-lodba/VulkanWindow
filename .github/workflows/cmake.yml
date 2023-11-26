@@ -24,11 +24,7 @@ jobs:
 
     - if: ${{ matrix.os == 'windows-latest' }}
       name: Install Vulkan SDK
-      run: >
-        choco --version
-        winget --version
-        winget install KhronosGroup.VulkanSDK
-        
+      run: winget install KhronosGroup.VulkanSDK
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
