@@ -26,10 +26,7 @@ jobs:
       name: Install Vulkan SDK
       run: |
         choco --version
-        choco install winget-cli
-        winget --version
-        winget install KhronosGroup.VulkanSDK
-        
+        choco install vulkan-sdk
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
