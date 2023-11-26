@@ -16,6 +16,11 @@ include(scripts/imgui.cmake)
 
 include_directories(${imgui_SOURCE_DIR} ..)
 include_directories(${glfw_SOURCE_DIR}/deps)
+include_directories(VulkanWindow PRIVATE
+  ${imgui_SOURCE_DIR}
+  ${imgui_SOURCE_DIR}/misc/cpp/
+  ${imgui_SOURCE_DIR}/backends/
+)
 
 file(GLOB sources source/**.cpp)
 
