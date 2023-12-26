@@ -30,6 +30,7 @@ jobs:
         $version = (Invoke-WebRequest -Uri "https://vulkan.lunarg.com/sdk/latest/windows.txt").Content
         $Env:VK_SDK_PATH = "C:\VulkanSDK\$version"
         $Env:VULKAN_SDK = "C:\VulkanSDK\$version"
+        $env:PATH += ";C:\VulkanSDK\$version\Bin"
         Get-ChildItem env:
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
