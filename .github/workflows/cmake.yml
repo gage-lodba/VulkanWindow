@@ -28,10 +28,12 @@ jobs:
         Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "C:\vulkan-sdk.exe"
         C:\vulkan-sdk.exe --accept-licenses --default-answer --confirm-command install
         $version = (Invoke-WebRequest -Uri "https://vulkan.lunarg.com/sdk/latest/windows.txt").Content
+        $vulkan_path
         $Env:VK_SDK_PATH = "C:\VulkanSDK\$version"
         $Env:VULKAN_SDK = "C:\VulkanSDK\$version"
         $env:PATH += ";C:\VulkanSDK\$version\Bin"
         Get-ChildItem env:
+        Get-Content -Path "C:\VulkanSDK\$version"
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
@@ -40,7 +42,6 @@ jobs:
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_CXX_COMPILER=g++
         -DCMAKE_C_COMPILER=gcc
-        -debug-find
 
     - if: ${{matrix.os == 'windows-latest'}}
       name: Configure for windows
