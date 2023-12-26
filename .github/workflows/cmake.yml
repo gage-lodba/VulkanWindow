@@ -25,8 +25,11 @@ jobs:
     - if: ${{ matrix.os == 'windows-latest' }}
       name: Install Vulkan SDK
       run: |
-        Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "C:\vulkan-sdk.exe"
+        Invoke-WebRequest -Uri $Vulkan_URL -OutFile "C:\vulkan-sdk.exe"
         C:\vulkan-sdk.exe --accept-licenses --default-answer --confirm-command install
+        Get-ChildItem env:
+      env:
+        Vulkan_URL: https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
