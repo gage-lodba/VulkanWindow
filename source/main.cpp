@@ -475,7 +475,7 @@ int main(int, char**) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::SetNextWindowSize(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(400, 300));
     ImGui::Begin("Hello, world!");
     ImGui::End();
 
