@@ -27,6 +27,9 @@ jobs:
       run: |
         Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "C:\vulkan-sdk.exe"
         C:\vulkan-sdk.exe --accept-licenses --default-answer --confirm-command install
+        $version = (Invoke-WebRequest -Uri "https://vulkan.lunarg.com/sdk/latest/windows.txt").Content
+        $Env:VK_SDK_PATH = "C:\VulkanSDK\$version"
+        $Env:VULKAN_SDK = "C:\VulkanSDK\$version"
         Get-ChildItem env:
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
