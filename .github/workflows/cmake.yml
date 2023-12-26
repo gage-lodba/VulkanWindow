@@ -25,15 +25,15 @@ jobs:
     - if: ${{ matrix.os == 'windows-latest' }}
       name: Install Vulkan SDK
       run: |
+        choco list
         Invoke-WebRequest -Uri "https://sdk.lunarg.com/sdk/download/latest/windows/vulkan-sdk.exe" -OutFile "C:\vulkan-sdk.exe"
         C:\vulkan-sdk.exe --accept-licenses --default-answer --confirm-command install
         $version = (Invoke-WebRequest -Uri "https://vulkan.lunarg.com/sdk/latest/windows.txt").Content
-        $vulkan_path
-        $Env:VK_SDK_PATH = "C:\VulkanSDK\$version"
-        $Env:VULKAN_SDK = "C:\VulkanSDK\$version"
-        $env:PATH += ";C:\VulkanSDK\$version\Bin"
+        $sdk_path = "C:\VulkanSDK\$version"
+        $Env:VK_SDK_PATH = "$sdk_path"
+        $Env:VULKAN_SDK = "$sdk_path"
+        $env:PATH += ";$sdk_path\Bin"
         Get-ChildItem env:
-        Get-ChildItem -Path "C:\VulkanSDK\$version"
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
