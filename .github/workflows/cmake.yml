@@ -33,7 +33,7 @@ jobs:
         $Env:VULKAN_SDK = "C:\VulkanSDK\$version"
         $env:PATH += ";C:\VulkanSDK\$version\Bin"
         Get-ChildItem env:
-        Get-Content -Path "C:\VulkanSDK\$version"
+        Get-ChildItem -Path "C:\VulkanSDK\$version"
 
     - if: ${{matrix.os == 'ubuntu-latest'}}
       name: Configure for linux
