@@ -1,5 +1,5 @@
 ### VulkanWindow
-An example vulkan window project, using GLFW and the Vulkan SDK.
+A minimalistic project designed for straightforward window creation using ImGui, GLFW, and Vulkan. It provides a hassle-free environment for developing graphical user interfaces with ease.
 
 ### Tested platforms
 Tested to work on both windows and linux.
