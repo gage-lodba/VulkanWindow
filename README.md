@@ -13,4 +13,4 @@ gcc and g++ compilers.
 
 [GLFW](https://github.com/glfw/glfw) is a multi-platform library for OpenGL, OpenGL ES, Vulkan, window and input.
 
-[CMake](https://www.vulkan.org/) is a low-overhead, cross-platform API, open standard for 3D graphics and computing.  
+[Vulkan](https://www.vulkan.org/) is a low-overhead, cross-platform API, open standard for 3D graphics and computing.  
