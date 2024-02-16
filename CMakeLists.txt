@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.11)
 project(VulkanWindow C CXX)
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -11,33 +11,16 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -DVK_PROTOTYPES")
 
 find_package(Vulkan REQUIRED)
 
-include(scripts/glfw.cmake)
-include(scripts/imgui.cmake)
-
-include_directories(${imgui_SOURCE_DIR} ..)
-include_directories(${glfw_SOURCE_DIR}/deps)
-include_directories(VulkanWindow PRIVATE
-  ${imgui_SOURCE_DIR}
-  ${imgui_SOURCE_DIR}/misc/cpp/
-  ${imgui_SOURCE_DIR}/backends/
-)
+add_subdirectory(glfw)
+# add_subdirectory(imgui)
+# include_directories(VulkanWindow PRIVATE glfw/include/)
+set(IMGUI_DIR ./imgui)
+include_directories(${IMGUI_DIR} ${IMGUI_DIR}/backends ..)
 
 file(GLOB sources source/**.cpp)
 
-add_executable(VulkanWindow ${sources}
-  ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
-  ${imgui_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
-  ${imgui_SOURCE_DIR}/imgui.cpp
-  ${imgui_SOURCE_DIR}/imgui_draw.cpp
-  ${imgui_SOURCE_DIR}/imgui_demo.cpp
-  ${imgui_SOURCE_DIR}/imgui_tables.cpp
-  ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-)
-
+add_executable(VulkanWindow ${sources} ${IMGUI_DIR}/backends/imgui_impl_glfw.cpp ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp ${IMGUI_DIR}/imgui.cpp ${IMGUI_DIR}/imgui_draw.cpp ${IMGUI_DIR}/imgui_demo.cpp ${IMGUI_DIR}/imgui_tables.cpp ${IMGUI_DIR}/imgui_widgets.cpp)
 target_link_libraries(VulkanWindow PUBLIC
-  glfw
   Vulkan::Vulkan
+  glfw
 )
-
-target_compile_definitions(VulkanWindow PUBLIC -DImTextureID=ImU64)
