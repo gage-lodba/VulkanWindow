@@ -21,8 +21,7 @@ jobs:
       - if: ${{matrix.os == 'ubuntu-latest'}}
         name: Update packages
         run: |
-          sudo apt-get update
-          sudo apt-get install -y --fix-missing libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
+          sudo apt-get install -y libglfw3-dev gcc-multilib g++-multilib libvulkan-dev libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - if: ${{ matrix.os == 'windows-latest' }}
         name: Install Vulkan SDK
@@ -32,26 +31,26 @@ jobs:
           vulkan-components: Vulkan-Headers, Vulkan-Loader
           vulkan-use-cache: true
 
-      - name: Configuration
+      - if: ${{matrix.os == 'ubuntu-latest'}}
+        name: Configure for linux
         run: >
-          if [[ $RUNNER_OS == 'Linux' ]]; then
-            cmake -B build \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_COMPILER=g++ \
-              -DCMAKE_C_COMPILER=gcc
-          elif [[ $RUNNER_OS == 'Windows' ]]; then
-            cmake -B build \
-              -G "MinGW Makefiles" \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_CXX_COMPILER=g++ \
-              -DCMAKE_C_COMPILER=gcc
-          else
-            echo "Unsupported operating system"
-            exit 1
-          fi
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_C_COMPILER=gcc
+
+      - if: ${{matrix.os == 'windows-latest'}}
+        name: Configure for windows
+        run: >
+          cmake -B build
+          -G "MinGW Makefiles"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_C_COMPILER=gcc
+
       - name: Build release
         run: cmake --build build --config Release
-
+      
       # - name: Test
       #   working-directory: ${{ github.workspace }}/build
       #   run: ctest --build-config Release
