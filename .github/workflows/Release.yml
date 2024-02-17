@@ -34,12 +34,12 @@ jobs:
 
       - name: Configuration
         run: >
-          if [ $matrix.os == 'ubuntu-latest' ]; then
+          if [[ $RUNNER_OS == 'Linux' ]]; then
             cmake -B build \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_COMPILER=g++ \
               -DCMAKE_C_COMPILER=gcc
-          elif [ $matrix.os == 'windows-latest' ]; then
+          elif [[ $RUNNER_OS == 'Windows' ]]; then
             cmake -B build \
               -G "MinGW Makefiles" \
               -DCMAKE_BUILD_TYPE=Release \
@@ -49,7 +49,6 @@ jobs:
             echo "Unsupported operating system"
             exit 1
           fi
-
       - name: Build release
         run: cmake --build build --config Release
 
