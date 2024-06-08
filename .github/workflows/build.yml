@@ -9,6 +9,9 @@ jobs:
   windows:
     runs-on: windows-latest
 
+    strategy:
+      fail-fast: true
+
     steps:
       - uses: actions/checkout@v3
         with:
@@ -45,6 +48,9 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
 
     steps:
       - uses: actions/checkout@v3
