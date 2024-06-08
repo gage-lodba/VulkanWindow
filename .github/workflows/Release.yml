@@ -4,7 +4,7 @@ on: push
 
 jobs:
   build:
-    name: ${{ matrix.os }} Release
+    name: ${{ matrix.os }} build
     runs-on: ${{ matrix.os }}
 
     strategy:
@@ -14,7 +14,7 @@ jobs:
         os: [ubuntu-latest, windows-latest]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
@@ -57,8 +57,8 @@ jobs:
       #   working-directory: ${{ github.workspace }}/build
       #   run: ctest --build-config Release
 
-      - name: Upload Artifact
-        uses: actions/upload-artifact@v3
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
         with:
           path: build/**/VulkanWindow*
           if-no-files-found: error
@@ -69,16 +69,13 @@ jobs:
     needs: [build]
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Download Artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
-        with:
-          name: artifact
-          merge-multiple: true
 
       - name: Release Build
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           name: Release
           tag_name: ${{ github.run_id }}
