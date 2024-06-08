@@ -84,5 +84,5 @@ jobs:
             **This release has been built by Github Actions**
             [Link to build](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           files: |
-            VulkanWindow
-            VulkanWindow.exe
+            ubuntu-latest/VulkanWindow
+            windows-latest/VulkanWindow.exe
