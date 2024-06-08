@@ -21,6 +21,7 @@ file(GLOB sources
   imgui/backends/imgui_impl_glfw.h
 )
 
-add_executable(VulkanWindow ${sources})
+add_executable(VulkanWindow)
 
+target_sources(VulkanWindow PRIVATE ${sources})
 target_link_libraries(VulkanWindow PUBLIC glfw;Vulkan::Vulkan)

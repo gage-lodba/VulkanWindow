@@ -71,15 +71,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      - name: Download Linux Artifact
-        uses: actions/download-artifact@v3
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: ubuntu-latest
-
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: windows-latest
+          merge-multiple: true
 
       - name: Release Build
         uses: softprops/action-gh-release@v1
