@@ -2,7 +2,6 @@ name: build
 
 on:
   push:
-  workflow_run:
     branches:
       - master
 
