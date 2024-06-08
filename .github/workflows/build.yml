@@ -60,7 +60,7 @@ jobs:
       - name: Update packages
         run: |
           sudo apt-get update
-          sudo apt-get install -y libglfw3-dev gcc-multilib g++-multilib libfreetype6-dev libvulkan-dev
+          sudo apt-get install -y libglfw3-dev gcc-multilib g++-multilib libfreetype6-dev libvulkan-dev libxkbcommon-dev
 
       - name: Configure for linux
         run: >
