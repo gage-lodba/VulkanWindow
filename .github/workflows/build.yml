@@ -35,10 +35,6 @@ jobs:
       - name: Build release
         run: cmake --build build --config Release
       
-      # - name: Test
-      #   working-directory: ${{ github.workspace }}/build
-      #   run: ctest --build-config Release
-
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -72,10 +68,6 @@ jobs:
       - name: Build release
         run: cmake --build build --config Release
         
-        # - name: Test
-        #   working-directory: ${{ github.workspace }}/build
-        #   run: ctest --build-config Release
-  
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:

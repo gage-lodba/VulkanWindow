@@ -15,5 +15,20 @@ Tested to work on both windows and linux.
 
 [Vulkan](https://www.vulkan.org/) is a cross-platform industry standard enabling developers to target a wide range of devices with the same graphics API. 
 
-#### References
-[Roboto](https://fonts.google.com/specimen/Roboto) a font used inside of this project.
+### Building from source
+
+#### Windows
+```
+cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+
+cmake --build build --config Release
+```
+#### Linux
+```
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+
+cmake --build build --config Release
+```
+
+### Credits
+[Roboto](https://github.com/googlefonts/roboto) font by Christian Robertson (Apache-2.0 license).
