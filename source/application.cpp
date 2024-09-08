@@ -418,12 +418,11 @@ void Application::Initialize() {
   // Enable Gamepad Controls
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
-  ImGui::StyleColorsDark();
+  ApplyTheme();
 
   ImGui_ImplGlfw_InitForVulkan(m_WindowHandle, true);
 
   ImGui_ImplVulkan_InitInfo init_info = {};
-
   init_info.Instance = g_Instance;
   init_info.PhysicalDevice = g_PhysicalDevice;
   init_info.Device = g_Device;
@@ -487,9 +486,7 @@ void Application::Run() {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    ImGui::SetNextWindowSize(ImVec2(400, 300));
-    ImGui::Begin("Hello, world!");
-    ImGui::End();
+    Render();
 
     ImGui::Render();
     ImDrawData* draw_data = ImGui::GetDrawData();
@@ -505,6 +502,10 @@ void Application::Run() {
     }
   }
 }
+
+void Application::ApplyTheme() { ImGui::StyleColorsDark(); }
+
+void Application::Render() { ImGui::ShowDemoWindow(); }
 
 bool Application::isRunning() { return Running; }
 

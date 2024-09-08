@@ -20,6 +20,8 @@ class Application {
   void Uninitialize();
 
   void Run();
+  virtual void ApplyTheme();
+  virtual void Render();
 
   bool isRunning();
 
