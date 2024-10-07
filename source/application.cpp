@@ -1,6 +1,13 @@
 #include "application.hpp"
 
-#if defined(_MSC_VER) && (_MSC_VER >= 1900) && \
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
+#if defined(_MSC_VER) && (_MSC_VER >= 1900) &&                                 \
     !defined(IMGUI_DISABLE_WIN32_FUNCTIONS)
 #pragma comment(lib, "legacy_stdio_definitions")
 #endif
@@ -10,7 +17,7 @@
 #define APP_USE_VULKAN_DEBUG_REPORT
 #endif
 
-static VkAllocationCallbacks* g_Allocator = NULL;
+static VkAllocationCallbacks *g_Allocator = NULL;
 static VkInstance g_Instance = VK_NULL_HANDLE;
 static VkPhysicalDevice g_PhysicalDevice = VK_NULL_HANDLE;
 static VkDevice g_Device = VK_NULL_HANDLE;
@@ -24,41 +31,45 @@ static ImGui_ImplVulkanH_Window g_MainWindowData;
 static int g_MinImageCount = 2;
 static bool g_SwapChainRebuild = false;
 
-static void glfw_error_callback(int error, const char* description) {
+static void glfw_error_callback(int error, const char *description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
 static void check_vk_result(VkResult err) {
-  if (err == 0) return;
+  if (err == 0)
+    return;
 
   fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
 
-  if (err < 0) abort();
+  if (err < 0)
+    abort();
 }
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
 static VKAPI_ATTR VkBool32 VKAPI_CALL
 debug_report(VkDebugReportFlagsEXT flags, VkDebugReportObjectTypeEXT objectType,
              uint64_t object, size_t location, int32_t messageCode,
-             const char* pLayerPrefix, const char* pMessage, void* pUserData) {
+             const char *pLayerPrefix, const char *pMessage, void *pUserData) {
   (void)flags;
   (void)object;
   (void)location;
   (void)messageCode;
   (void)pUserData;
-  (void)pLayerPrefix;  // Unused arguments
+  (void)pLayerPrefix; // Unused arguments
 
   fprintf(stderr, "[vulkan] Debug report from ObjectType: %i\nMessage: %s\n\n",
           objectType, pMessage);
 
   return VK_FALSE;
 }
-#endif  // APP_USE_VULKAN_DEBUG_REPORT
+#endif // APP_USE_VULKAN_DEBUG_REPORT
 
-static bool IsExtensionAvailable(
-    const ImVector<VkExtensionProperties>& properties, const char* extension) {
-  for (const VkExtensionProperties& p : properties)
-    if (strcmp(p.extensionName, extension) == 0) return true;
+static bool
+IsExtensionAvailable(const ImVector<VkExtensionProperties> &properties,
+                     const char *extension) {
+  for (const VkExtensionProperties &p : properties)
+    if (strcmp(p.extensionName, extension) == 0)
+      return true;
   return false;
 }
 
@@ -73,18 +84,19 @@ static VkPhysicalDevice SetupVulkan_SelectPhysicalDevice() {
   err = vkEnumeratePhysicalDevices(g_Instance, &gpu_count, gpus.Data);
   check_vk_result(err);
 
-  for (VkPhysicalDevice& device : gpus) {
+  for (VkPhysicalDevice &device : gpus) {
     VkPhysicalDeviceProperties properties;
     vkGetPhysicalDeviceProperties(device, &properties);
     if (properties.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU)
       return device;
   }
 
-  if (gpu_count > 0) return gpus[0];
+  if (gpu_count > 0)
+    return gpus[0];
   return VK_NULL_HANDLE;
 }
 
-static void SetupVulkan(ImVector<const char*> instance_extensions) {
+static void SetupVulkan(ImVector<const char *> instance_extensions) {
   VkResult err;
 
   {
@@ -113,7 +125,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
 #endif
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
-    const char* layers[] = {"VK_LAYER_KHRONOS_validation"};
+    const char *layers[] = {"VK_LAYER_KHRONOS_validation"};
     create_info.enabledLayerCount = 1;
     create_info.ppEnabledLayerNames = layers;
     instance_extensions.push_back("VK_EXT_debug_report");
@@ -148,7 +160,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
   {
     uint32_t count;
     vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &count, nullptr);
-    VkQueueFamilyProperties* queues = (VkQueueFamilyProperties*)malloc(
+    VkQueueFamilyProperties *queues = (VkQueueFamilyProperties *)malloc(
         sizeof(VkQueueFamilyProperties) * count);
     vkGetPhysicalDeviceQueueFamilyProperties(g_PhysicalDevice, &count, queues);
     for (uint32_t i = 0; i < count; i++)
@@ -161,7 +173,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
   }
 
   {
-    ImVector<const char*> device_extensions;
+    ImVector<const char *> device_extensions;
     device_extensions.push_back("VK_KHR_swapchain");
 
     uint32_t properties_count;
@@ -212,7 +224,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions) {
   }
 }
 
-static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
+static void SetupVulkanWindow(ImGui_ImplVulkanH_Window *wd,
                               VkSurfaceKHR surface, int width, int height) {
   wd->Surface = surface;
 
@@ -259,7 +271,7 @@ static void CleanupVulkan() {
       (PFN_vkDestroyDebugReportCallbackEXT)vkGetInstanceProcAddr(
           g_Instance, "vkDestroyDebugReportCallbackEXT");
   vkDestroyDebugReportCallbackEXT(g_Instance, g_DebugReport, g_Allocator);
-#endif  // APP_USE_VULKAN_DEBUG_REPORT
+#endif // APP_USE_VULKAN_DEBUG_REPORT
 
   vkDestroyDevice(g_Device, g_Allocator);
   vkDestroyInstance(g_Instance, g_Allocator);
@@ -270,7 +282,7 @@ static void CleanupVulkanWindow() {
                                   g_Allocator);
 }
 
-static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
+static void FrameRender(ImGui_ImplVulkanH_Window *wd, ImDrawData *draw_data) {
   VkResult err;
 
   VkSemaphore image_acquired_semaphore =
@@ -289,12 +301,12 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   }
 
   check_vk_result(err);
-  ImGui_ImplVulkanH_Frame* fd = &wd->Frames[wd->FrameIndex];
+  ImGui_ImplVulkanH_Frame *fd = &wd->Frames[wd->FrameIndex];
 
   {
     err = vkWaitForFences(
         g_Device, 1, &fd->Fence, VK_TRUE,
-        UINT64_MAX);  // wait indefinitely instead of periodically checking
+        UINT64_MAX); // wait indefinitely instead of periodically checking
     check_vk_result(err);
 
     err = vkResetFences(g_Device, 1, &fd->Fence);
@@ -346,8 +358,9 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   }
 }
 
-static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
-  if (g_SwapChainRebuild) return;
+static void FramePresent(ImGui_ImplVulkanH_Window *wd) {
+  if (g_SwapChainRebuild)
+    return;
 
   VkSemaphore render_complete_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].RenderCompleteSemaphore;
@@ -368,7 +381,7 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
   check_vk_result(err);
   wd->SemaphoreIndex =
       (wd->SemaphoreIndex + 1) %
-      wd->SemaphoreCount;  // Now we can use the next set of semaphores
+      wd->SemaphoreCount; // Now we can use the next set of semaphores
 }
 
 Application::Application() { Initialize(); }
@@ -378,7 +391,8 @@ Application::~Application() { Uninitialize(); }
 void Application::Initialize() {
   glfwSetErrorCallback(glfw_error_callback);
 
-  if (!glfwInit()) return;
+  if (!glfwInit())
+    return;
 
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
   m_WindowHandle =
@@ -389,9 +403,9 @@ void Application::Initialize() {
     return;
   }
 
-  ImVector<const char*> extensions;
+  ImVector<const char *> extensions;
   uint32_t extensions_count = 0;
-  const char** glfw_extensions =
+  const char **glfw_extensions =
       glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
@@ -404,18 +418,16 @@ void Application::Initialize() {
 
   int w, h;
   glfwGetFramebufferSize(m_WindowHandle, &w, &h);
-  ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+  ImGui_ImplVulkanH_Window *wd = &g_MainWindowData;
   SetupVulkanWindow(wd, surface, w, h);
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
-  ImGuiIO& io = ImGui::GetIO();
+  ImGuiIO &io = ImGui::GetIO();
   (void)io;
 
-  // Enable Keyboard Controls
+  io.IniFilename = NULL;
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
-
-  // Enable Gamepad Controls
   io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
 
   ApplyTheme();
@@ -463,7 +475,7 @@ void Application::Uninitialize() {
 void Application::Run() {
   Running = true;
 
-  ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+  ImGui_ImplVulkanH_Window *wd = &g_MainWindowData;
   ImVec4 clear_color = ImVec4(0.45f, 0.55f, 0.60f, 1.00f);
 
   while (!glfwWindowShouldClose(m_WindowHandle)) {
@@ -489,7 +501,7 @@ void Application::Run() {
     Render();
 
     ImGui::Render();
-    ImDrawData* draw_data = ImGui::GetDrawData();
+    ImDrawData *draw_data = ImGui::GetDrawData();
     const bool is_minimized =
         (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
     if (!is_minimized) {

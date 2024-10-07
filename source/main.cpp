@@ -1,16 +1,18 @@
 #include "application.hpp"
 
+#include <imgui.h>
+
 class VulkanWindow : public Application {
- public:
+public:
   virtual void Render() override {
     ImGuiWindowFlags window_flags;
     window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                    ImGuiWindowFlags_NoTitleBar;
 
-    const char* Title = "Vulkan window";
+    const char *Title = "Vulkan window";
     ImVec2 textSize = ImGui::CalcTextSize(Title);
 
-    const ImGuiViewport* viewport = ImGui::GetMainViewport();
+    const ImGuiViewport *viewport = ImGui::GetMainViewport();
     const float midX = (viewport->WorkSize.x / 2) - 200;
     const float midY = (viewport->WorkSize.y / 2) - 150;
 
@@ -24,7 +26,7 @@ class VulkanWindow : public Application {
     const float centerY = (windSize.y / 2) - (textSize.y / 2);
 
     ImGui::SetCursorPos({centerX, centerY});
-    ImGui::Text(Title);
+    ImGui::Text("%s", Title);
 
     ImGui::SetCursorPosY(windSize.y - 30);
     if (ImGui::Button("Reset window pos", {-1, -1})) {
@@ -35,7 +37,7 @@ class VulkanWindow : public Application {
   }
 
   virtual void ApplyTheme() override {
-    ImGuiStyle* style = &ImGui::GetStyle();
+    ImGuiStyle *style = &ImGui::GetStyle();
     style->WindowRounding = 8.f;
     style->FrameRounding = 8.f;
 
@@ -47,8 +49,18 @@ class VulkanWindow : public Application {
   }
 };
 
-int main(int, char**) {
+#ifdef _WIN32
+#include <Windows.h>
+
+int WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
   VulkanWindow app;
   app.ApplyTheme();
   app.Run();
 }
+#else
+int main(int, char **) {
+  VulkanWindow app;
+  app.ApplyTheme();
+  app.Run();
+}
+#endif
