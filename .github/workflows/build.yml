@@ -6,61 +6,85 @@ on:
       - main
 
 jobs:
-  build:
-    name: ${{ matrix.os }} build
-    runs-on: ${{ matrix.os }}
+  windows:
+    runs-on: windows-latest
 
     strategy:
       fail-fast: true
 
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-        include:
-          - os: ubuntu-latest
-            path: build/VulkanWindow
-          - os: windows-latest
-            path: build/MinSizeRel/VulkanWindow.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          
+      - name: Install Vulkan SDK
+        uses: humbletim/setup-vulkan-sdk@v1.2.0
+        with:
+          vulkan-query-version: 1.3.204.0
+          vulkan-components: Vulkan-Headers, Vulkan-Loader
+          vulkan-use-cache: true
+
+      - name: Configure for windows
+        run: >
+          cmake -B build
+          -G "MinGW Makefiles"
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_C_COMPILER=gcc
+
+      - name: Build release
+        run: cmake --build build --config Release
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-latest
+          path: build/VulkanWindow.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: true
 
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
 
-      - name: Configure cmake
+      - name: Update packages
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libglfw3-dev gcc-multilib g++-multilib libfreetype6-dev libvulkan-dev libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Configure for linux
         run: >
-          cmake 
-          -B build
-          -DCMAKE_BUILD_TYPE=MinSizeRel
-  
+          cmake -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_CXX_COMPILER=g++
+          -DCMAKE_C_COMPILER=gcc
+
       - name: Build release
-        run: >
-          cmake 
-          --build build
-          --config MinSizeRel
+        run: cmake --build build --config Release
         
-      - name: Upload Artifact
+      - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.os }}
-          path: ${{ matrix.path }}
+          name: ubuntu-latest
+          path: build/VulkanWindow
+          if-no-files-found: error
 
   release:
     name: Release
     runs-on: [ubuntu-latest]
-    needs: [build]
+    needs: [windows, linux]
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Linux Artifact
+      - name: Download artifacts
         uses: actions/download-artifact@v4
-        with:
-          name: ubuntu-latest
-
-      - name: Download Windows Artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-latest
 
       - name: Release Build
         uses: softprops/action-gh-release@v2
@@ -71,5 +95,5 @@ jobs:
             **This release has been built by Github Actions**
             [Link to build](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           files: |
-            VulkanWindow
-            VulkanWindow.exe
+            ubuntu-latest/VulkanWindow
+            windows-latest/VulkanWindow.exe
