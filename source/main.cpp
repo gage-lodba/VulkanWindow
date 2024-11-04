@@ -12,9 +12,9 @@ public:
     const char *Title = "Vulkan window";
     ImVec2 textSize = ImGui::CalcTextSize(Title);
 
-    const ImGuiViewport *viewport = ImGui::GetMainViewport();
-    const float midX = (viewport->WorkSize.x / 2) - 200;
-    const float midY = (viewport->WorkSize.y / 2) - 150;
+    const ImVec2 viewport = ImGui::GetMainViewport()->WorkSize;
+    const float midX = (viewport.x / 2) - 200;
+    const float midY = (viewport.y / 2) - 150;
 
     ImGui::SetNextWindowPos({midX, midY}, ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize({400, 300}, ImGuiCond_FirstUseEver);
@@ -54,13 +54,19 @@ public:
 
 int WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
   VulkanWindow app;
+
   app.ApplyTheme();
   app.Run();
+
+  return 0;
 }
 #else
 int main(int, char **) {
   VulkanWindow app;
+
   app.ApplyTheme();
   app.Run();
+
+  return 0;
 }
 #endif

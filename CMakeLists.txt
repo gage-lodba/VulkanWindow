@@ -1,23 +1,21 @@
 cmake_minimum_required(VERSION 3.11)
-project(VulkanWindow C CXX)
+project(VulkanWindow)
 
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED TRUE)
-
+# Vulkan
 find_package(Vulkan REQUIRED)
 
+# Glfw
 add_subdirectory(glfw)
-include_directories(${GLFW_DIR}/deps)
+include_directories(glfw/include)
 
-set(IMGUI_DIR imgui/)
+# ImGui
 include_directories(imgui/ imgui/backends imgui/misc/cpp ..)
 
 file(
   GLOB
   sources
-  source/main.cpp
-  source/application.cpp
-  source/application.hpp
+  source/**.cpp
+  source/**.hpp
   imgui/imgui.cpp
   imgui/imgui.h
   imgui/imgui_draw.cpp
@@ -31,8 +29,10 @@ file(
   imgui/backends/imgui_impl_glfw.h)
 
 add_executable(VulkanWindow)
+
 target_sources(VulkanWindow PRIVATE ${sources})
 target_link_libraries(VulkanWindow PUBLIC glfw Vulkan::Vulkan)
+target_compile_features(VulkanWindow PRIVATE cxx_std_20)
 
 if(WIN32)
   set_property(TARGET VulkanWindow PROPERTY WIN32_EXECUTABLE true)

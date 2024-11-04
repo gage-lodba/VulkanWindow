@@ -1,4 +1,11 @@
-### VulkanWindow
+<div align="center">
+
+# VulkanWindow
+
+![Build](https://github.com/JerimiahOfficial/VulkanWindow/actions/workflows/build_release.yml/badge.svg)
+
+</div>
+
 A minimalistic project designed for straightforward window creation using ImGui, GLFW, and Vulkan. It provides a hassle-free environment for developing graphical user interfaces with ease.
 
 ### Tested platforms
@@ -20,13 +27,11 @@ Tested to work on both windows and linux.
 #### Windows
 ```
 cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-
 cmake --build build --config Release
 ```
 #### Linux
 ```
 cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-
 cmake --build build --config Release
 ```
 
