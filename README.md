@@ -1,8 +1,10 @@
 <div align="center">
 
-# VulkanWindow
-
-![Build Status](https://github.com/gage-lodba//VulkanWindow/actions/workflows/build.yml/badge.svg)
+  <h1>VulkanWindow</h1>
+  
+  <a href="https://github.com/gage-lodba/VulkanWindow/actions/workflows/build.yml">
+    <img src="https://github.com/gage-lodba//VulkanWindow/actions/workflows/build.yml/badge.svg" alt="Build Status" />
+  </a>
 
 </div>
 
