@@ -25,17 +25,17 @@ jobs:
         run: |
           curl -O https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe
           .\vulkan_sdk.exe --accept-licenses --default-answer --confirm-command install
-          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-          refreshenv
 
       - name: Configure for windows
-        run: >
-          cmake -B build
-          -G "MinGW Makefiles"
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_CXX_COMPILER=g++
-          -DCMAKE_C_COMPILER=gcc
-
+        run: |
+          curl -o .\windows.json https://vulkan.lunarg.com/sdk/latest/windows.json
+          $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
+          echo "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION" >> $GITHUB_ENV
+          echo "VK_SDK_PATH=C:\VulkanSDK\$env:VULKAN_VERSION" >> $GITHUB_ENV
+          echo "Vulkan_LIBRARY=C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib" >> $GITHUB_ENV
+          echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$env:VULKAN_VERSION\Include" >> $GITHUB_ENV
+          refreshenv
+          cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
 
       - name: Build release
         run: cmake --build build --config Release
