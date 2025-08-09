@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.11)
 project(VulkanWindow)
 
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 # Vulkan
 find_package(Vulkan REQUIRED)
 
@@ -31,8 +34,7 @@ file(
 add_executable(VulkanWindow)
 
 target_sources(VulkanWindow PRIVATE ${sources})
-target_link_libraries(VulkanWindow PUBLIC glfw Vulkan::Vulkan)
-target_compile_features(VulkanWindow PRIVATE cxx_std_20)
+target_link_libraries(VulkanWindow PRIVATE glfw Vulkan::Vulkan)
 
 if(WIN32)
   set_property(TARGET VulkanWindow PROPERTY WIN32_EXECUTABLE true)

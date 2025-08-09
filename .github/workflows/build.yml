@@ -1,9 +1,12 @@
-name: build
+name: Build and Release
 
 on:
   push:
     branches:
       - main
+    paths:
+      - 'source/**'
+      - 'CMakeLists.txt'
 
 jobs:
   windows:
