@@ -1,7 +1,7 @@
 <div align="center">
 
   <h1>VulkanWindow</h1>
-  
+
   <a href="https://github.com/gage-lodba/VulkanWindow/actions/workflows/build.yml">
     <img src="https://github.com/gage-lodba//VulkanWindow/actions/workflows/build.yml/badge.svg" alt="Build Status" />
   </a>
@@ -18,17 +18,10 @@ A minimalistic project designed for straightforward window creation using ImGui,
 
 [Vulkan SDK](https://www.vulkan.org/) is a cross-platform industry standard enabling developers to target a wide range of devices with the same graphics API.
 
-### Windows
+### Building
 
 ```bash
-cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-cmake --build build --config Release
-```
-
-### Linux
-
-```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
+cmake -B build
 cmake --build build --config Release
 ```
 
