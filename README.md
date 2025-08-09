@@ -2,7 +2,7 @@
 
 # VulkanWindow
 
-![Build Status](https://github.com/gage-lodba//VulkanWindow/actions/workflows/build_release.yml/badge.svg)
+![Build Status](https://github.com/gage-lodba//VulkanWindow/actions/workflows/build.yml/badge.svg)
 
 </div>
 
