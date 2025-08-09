@@ -30,10 +30,11 @@ jobs:
         run: |
           curl -o .\windows.json https://vulkan.lunarg.com/sdk/latest/windows.json
           $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
-          echo "VULKAN_SDK=C:\VulkanSDK\$env:VULKAN_VERSION" >> $GITHUB_ENV
-          echo "VK_SDK_PATH=C:\VulkanSDK\$env:VULKAN_VERSION" >> $GITHUB_ENV
-          echo "Vulkan_LIBRARY=C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib" >> $GITHUB_ENV
-          echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$env:VULKAN_VERSION\Include" >> $GITHUB_ENV
+          $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          $env:VK_SDK_PATH = "C:\VulkanSDK\$env:VULKAN_VERSION"
+          $env:Vulkan_LIBRARY = "C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib"
+          $env:Vulkan_INCLUDE_DIR = "C:\VulkanSDK\$env:VULKAN_VERSION\Include"
+          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           refreshenv
           cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
 
