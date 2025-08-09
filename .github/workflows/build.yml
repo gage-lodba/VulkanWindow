@@ -27,8 +27,8 @@ jobs:
           .\vulkan_sdk.exe --accept-licenses --default-answer --confirm-command install
           curl -o .\windows.json https://vulkan.lunarg.com/sdk/latest/windows.json
           $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
-          $env:Vulkan_LIBRARY = "C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib"
-          $env:Vulkan_INCLUDE_DIR = "C:\VulkanSDK\$env:VULKAN_VERSION\Include"
+          echo "Vulkan_LIBRARY=C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib" >> $GITHUB_ENV
+          echo "Vulkan_INCLUDE_DIR=C:\VulkanSDK\$env:VULKAN_VERSION\Include" >> $GITHUB_ENV
 
       - name: Configure for windows
         run: >
