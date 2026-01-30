@@ -42,7 +42,7 @@ jobs:
         run: cmake --build build --config Release
       
       - name: Upload artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: windows-latest
           path: build/VulkanWindow.exe
@@ -74,7 +74,7 @@ jobs:
         run: cmake --build build --config Release
         
       - name: Upload artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/upload-artifact@v6
         with:
           name: ubuntu-latest
           path: build/VulkanWindow
