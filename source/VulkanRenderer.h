@@ -5,6 +5,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -16,7 +17,7 @@ struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;
 
-  [[nodiscard]] constexpr bool isComplete() const noexcept {
+  [[nodiscard]] bool isComplete() const noexcept {
     return graphicsFamily.has_value() && presentFamily.has_value();
   }
 };
@@ -37,10 +38,21 @@ public:
 
   void drawFrame();
   void waitIdle() const;
-  void handleResize();
+
+  [[nodiscard]] VkDevice getDevice() const noexcept { return device; }
+  [[nodiscard]] VkPhysicalDevice getPhysicalDevice() const noexcept {
+    return physicalDevice;
+  }
+  [[nodiscard]] VkCommandPool getCommandPool() const noexcept {
+    return commandPool;
+  }
+  [[nodiscard]] VkQueue getGraphicsQueue() const noexcept {
+    return graphicsQueue;
+  }
 
 private:
   void createInstance();
+  void setupDebugMessenger();
   void createSurface();
   void pickPhysicalDevice();
   void createLogicalDevice();
@@ -58,6 +70,7 @@ private:
   void cleanupSwapChain();
   void recreateSwapChain();
 
+  [[nodiscard]] bool checkValidationLayerSupport() const;
   [[nodiscard]] bool isDeviceSuitable(VkPhysicalDevice device) const;
   [[nodiscard]] bool checkDeviceExtensionSupport(VkPhysicalDevice device) const;
   [[nodiscard]] QueueFamilyIndices
@@ -72,8 +85,18 @@ private:
   chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities) const;
   [[nodiscard]] std::vector<const char *> getRequiredExtensions() const;
 
+  // Debug callback
+  static VKAPI_ATTR VkBool32 VKAPI_CALL
+  debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
+                VkDebugUtilsMessageTypeFlagsEXT messageType,
+                const VkDebugUtilsMessengerCallbackDataEXT *pCallbackData,
+                void *pUserData);
+
   GLFWwindow *window;
+
+  VkAllocationCallbacks *allocator;
   VkInstance instance;
+  VkDebugUtilsMessengerEXT debugMessenger;
   VkSurfaceKHR surface;
   VkPhysicalDevice physicalDevice;
   VkDevice device;
@@ -99,12 +122,12 @@ private:
   std::unique_ptr<ImGuiManager> imguiManager;
   std::unique_ptr<UserInterface> userInterface;
 
-  static constexpr int MAX_FRAMES_IN_FLIGHT = 2;
+  static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
 
-  const std::vector<const char *> deviceExtensions = {
+  static constexpr std::array<const char *, 1> deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME};
 
-  const std::vector<const char *> validationLayers = {
+  static constexpr std::array<const char *, 1> validationLayers = {
       "VK_LAYER_KHRONOS_validation"};
 
 #ifdef NDEBUG

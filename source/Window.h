@@ -17,24 +17,14 @@ public:
   void pollEvents() const noexcept;
   [[nodiscard]] GLFWwindow *getGLFWWindow() const noexcept { return window; }
 
-  [[nodiscard]] int getWidth() const noexcept { return width; }
-  [[nodiscard]] int getHeight() const noexcept { return height; }
-
-  [[nodiscard]] bool wasWindowResized() const noexcept {
-    return framebufferResized;
-  }
-  void resetWindowResizedFlag() noexcept { framebufferResized = false; }
-
 private:
   void initWindow();
   void cleanup() noexcept;
 
-  static void framebufferResizeCallback(GLFWwindow *window, int width,
-                                        int height);
-
   GLFWwindow *window;
+
   int width;
   int height;
+
   std::string title;
-  bool framebufferResized{false};
 };

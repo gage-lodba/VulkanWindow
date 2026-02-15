@@ -4,3 +4,4 @@
 [submodule "glfw"]
 	path = glfw
 	url = https://github.com/glfw/glfw.git
+	branch = latest

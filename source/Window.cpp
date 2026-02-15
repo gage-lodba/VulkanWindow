@@ -22,14 +22,12 @@ void Window::initWindow() {
     glfwTerminate();
     throw std::runtime_error("Failed to create GLFW window");
   }
-
-  glfwSetWindowUserPointer(window, this);
-  glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
 }
 
 void Window::cleanup() noexcept {
   if (window) {
     glfwDestroyWindow(window);
+    window = nullptr;
   }
   glfwTerminate();
 }
@@ -39,11 +37,3 @@ bool Window::shouldClose() const noexcept {
 }
 
 void Window::pollEvents() const noexcept { glfwPollEvents(); }
-
-void Window::framebufferResizeCallback(GLFWwindow *window, int width,
-                                       int height) {
-  auto app = reinterpret_cast<Window *>(glfwGetWindowUserPointer(window));
-  app->framebufferResized = true;
-  app->width = width;
-  app->height = height;
-}

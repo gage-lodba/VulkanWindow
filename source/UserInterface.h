@@ -1,7 +1,5 @@
 #pragma once
 
-#include <vulkan/vulkan.h>
-
 class UserInterface {
 public:
   UserInterface() noexcept;
@@ -10,8 +8,8 @@ public:
   UserInterface(const UserInterface &) = delete;
   UserInterface &operator=(const UserInterface &) = delete;
 
-  void render(int windowWidth, int windowHeight) const;
+  void render() const;
 
 private:
-  void renderMainWindow(int windowWidth, int windowHeight) const;
+  void renderMainWindow() const;
 };

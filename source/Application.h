@@ -7,6 +7,8 @@
 class Application {
 public:
   Application();
+  Application(int width, int height);
+
   ~Application();
 
   void run();
@@ -15,6 +17,6 @@ private:
   std::unique_ptr<Window> window;
   std::unique_ptr<VulkanRenderer> renderer;
 
-  const int WIDTH = 800;
-  const int HEIGHT = 600;
+  static constexpr int DEFAULT_WIDTH = 800;
+  static constexpr int DEFAULT_HEIGHT = 600;
 };

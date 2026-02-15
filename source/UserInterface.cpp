@@ -3,11 +3,9 @@
 
 UserInterface::UserInterface() noexcept {}
 
-void UserInterface::render(int windowWidth, int windowHeight) const {
-  renderMainWindow(windowWidth, windowHeight);
-}
+void UserInterface::render() const { renderMainWindow(); }
 
-void UserInterface::renderMainWindow(int windowWidth, int windowHeight) const {
+void UserInterface::renderMainWindow() const {
   ImGuiWindowFlags window_flags;
   window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
                  ImGuiWindowFlags_NoTitleBar;

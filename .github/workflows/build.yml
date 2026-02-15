@@ -13,20 +13,12 @@ jobs:
   windows:
     runs-on: windows-latest
 
-    strategy:
-      fail-fast: true
-
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
-          
-      - name: Install Vulkan SDK
-        run: |
-          curl -O https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe
-          .\vulkan_sdk.exe --accept-licenses --default-answer --confirm-command install
 
-      - name: Configure for windows
+      - name: Install Vulkan SDK
         run: |
           curl -o .\windows.json https://vulkan.lunarg.com/sdk/latest/windows.json
           $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
@@ -38,9 +30,12 @@ jobs:
           refreshenv
           cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
 
+      - name: Configure for windows
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
       - name: Build release
         run: cmake --build build --config Release
-      
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
@@ -49,9 +44,6 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
-
-    strategy:
-      fail-fast: true
 
     steps:
       - uses: actions/checkout@v6
@@ -72,7 +64,7 @@ jobs:
 
       - name: Build release
         run: cmake --build build --config Release
-        
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
