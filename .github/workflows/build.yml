@@ -20,7 +20,12 @@ jobs:
 
       - name: Install Vulkan SDK
         run: |
-          curl -o .\windows.json https://vulkan.lunarg.com/sdk/latest/windows.json
+          Start-BitsTransfer -Source https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -Destination ./vulkan_sdk.exe
+          .\vulkan_sdk.exe --accept-licenses --default-answer --confirm-command install
+
+      - name: Configure for windows
+        run: |
+          Invoke-WebRequest -Uri https://vulkan.lunarg.com/sdk/latest/windows.json -OutFile .\windows.json
           $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
           $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_VERSION"
           $env:VK_SDK_PATH = "C:\VulkanSDK\$env:VULKAN_VERSION"
@@ -28,10 +33,7 @@ jobs:
           $env:Vulkan_INCLUDE_DIR = "C:\VulkanSDK\$env:VULKAN_VERSION\Include"
           Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
           refreshenv
-          cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
-
-      - name: Configure for windows
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build release
         run: cmake --build build --config Release
@@ -40,7 +42,7 @@ jobs:
         uses: actions/upload-artifact@v6
         with:
           name: windows-latest
-          path: build/VulkanWindow.exe
+          path: build/Release/VulkanWindow.exe
 
   linux:
     runs-on: ubuntu-latest
@@ -56,11 +58,7 @@ jobs:
           sudo apt-get install -y gcc-multilib g++-multilib libglfw3-dev vulkan-tools libvulkan-dev libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
 
       - name: Configure for linux
-        run: >
-          cmake -B build
-          -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_CXX_COMPILER=g++
-          -DCMAKE_C_COMPILER=gcc
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build release
         run: cmake --build build --config Release
