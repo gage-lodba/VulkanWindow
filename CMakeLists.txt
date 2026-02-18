@@ -36,6 +36,6 @@ target_sources(VulkanWindow PRIVATE ${sources})
 target_link_libraries(VulkanWindow PRIVATE glfw Vulkan::Vulkan)
 
 if(WIN32)
-  # set_source_files_properties(source/Main.cpp PROPERTIES COMPILE_DEFINITIONS main=WinMain)
-  # set_property(TARGET VulkanWindow PROPERTY WIN32_EXECUTABLE true)
+  set_source_files_properties(source/Main.cpp PROPERTIES COMPILE_DEFINITIONS main=WinMain)
+  set_property(TARGET VulkanWindow PROPERTY WIN32_EXECUTABLE true)
 endif()
