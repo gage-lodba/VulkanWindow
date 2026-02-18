@@ -51,11 +51,11 @@ ImGuiManager::ImGuiManager(GLFWwindow *window, VkInstance instance,
   init_info.Queue = queue;
   init_info.PipelineCache = VK_NULL_HANDLE;
   init_info.DescriptorPool = descriptorPool;
-  init_info.RenderPass = renderPass;
-  init_info.Subpass = 0;
+  init_info.PipelineInfoMain.RenderPass = renderPass;
+  init_info.PipelineInfoMain.Subpass = 0;
   init_info.MinImageCount = minImageCount;
   init_info.ImageCount = imageCount;
-  init_info.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+  init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
   init_info.Allocator = nullptr;
   init_info.CheckVkResultFn = nullptr;
 
