@@ -1,14 +1,12 @@
 #include "UserInterface.h"
 #include <imgui.h>
 
-UserInterface::UserInterface() noexcept {}
-
 void UserInterface::render() const { renderMainWindow(); }
 
 void UserInterface::renderMainWindow() const {
-  ImGuiWindowFlags window_flags;
-  window_flags = ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize |
-                 ImGuiWindowFlags_NoTitleBar;
+  ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoCollapse |
+                                  ImGuiWindowFlags_NoResize |
+                                  ImGuiWindowFlags_NoTitleBar;
 
   const char *Title = "Vulkan Window";
   ImVec2 textSize = ImGui::CalcTextSize(Title);

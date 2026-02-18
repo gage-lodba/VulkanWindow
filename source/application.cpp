@@ -29,7 +29,4 @@ void Application::run() {
     // Render a frame
     renderer->drawFrame();
   }
-
-  // Wait for device to finish before cleanup
-  renderer->waitIdle();
 }
