@@ -10,6 +10,10 @@
 
 A minimalistic project designed for straightforward window creation using ImGui, GLFW, and Vulkan. It provides a hassle-free environment for developing graphical user interfaces with ease.
 
+<div align="center">
+  <img src="assets/preview.png" alt="preview image"/>
+</div>
+
 ## Building from source
 
 ### Dependencies
@@ -24,7 +28,3 @@ A minimalistic project designed for straightforward window creation using ImGui,
 cmake -B build
 cmake --build build --config Release
 ```
-
-### Credits
-
-[Roboto](https://github.com/googlefonts/roboto) font by Christian Robertson (Apache-2.0 license).  
