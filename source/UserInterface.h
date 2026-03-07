@@ -1,15 +1,13 @@
 #pragma once
 
+/// Stateless demo UI — issues ImGui draw calls each frame.
 class UserInterface {
-public:
+ public:
   UserInterface() noexcept = default;
   ~UserInterface() = default;
 
-  UserInterface(const UserInterface &) = delete;
-  UserInterface &operator=(const UserInterface &) = delete;
+  void render();
 
-  void render() const;
-
-private:
-  void renderMainWindow() const;
+ private:
+  void renderMainWindow();
 };

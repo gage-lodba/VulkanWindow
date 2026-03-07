@@ -2,26 +2,36 @@
 
 #include <stdexcept>
 
-Window::Window(int width, int height, const std::string &title)
-    : window(nullptr), width(width), height(height), title(title) {
+Window::Window(int width, int height, const std::string &title, bool resizable)
+    : window(nullptr),
+      width(width),
+      height(height),
+      resizable(resizable),
+      title(title) {
   initWindow();
 }
 
 Window::~Window() { cleanup(); }
 
 void Window::initWindow() {
-  if (!glfwInit()) {
-    throw std::runtime_error("Failed to initialize GLFW");
-  }
-
   glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-  glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
+  glfwWindowHint(GLFW_RESIZABLE, resizable ? GLFW_TRUE : GLFW_FALSE);
 
   window = glfwCreateWindow(width, height, title.c_str(), nullptr, nullptr);
   if (!window) {
-    glfwTerminate();
     throw std::runtime_error("Failed to create GLFW window");
   }
+
+  glfwSetWindowUserPointer(window, this);
+  glfwSetFramebufferSizeCallback(window, framebufferResizeCallback);
+}
+
+void Window::framebufferResizeCallback(GLFWwindow *window, int width,
+                                       int height) {
+  auto *self = static_cast<Window *>(glfwGetWindowUserPointer(window));
+  self->width = width;
+  self->height = height;
+  self->framebufferResized = true;
 }
 
 void Window::cleanup() noexcept {
@@ -29,10 +39,9 @@ void Window::cleanup() noexcept {
     glfwDestroyWindow(window);
     window = nullptr;
   }
-  glfwTerminate();
 }
 
-bool Window::shouldClose() const noexcept {
+auto Window::shouldClose() const noexcept -> bool {
   return glfwWindowShouldClose(window);
 }
 
