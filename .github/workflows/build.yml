@@ -74,13 +74,15 @@ jobs:
         # vulkanwindow_add_shaders() guards make examples/ return() early and
         # the example targets are never built here — so example regressions
         # would slip past CI. With it, `cmake --build` compiles them too.
-        # GLFW enables its Wayland backend on the runner, which needs
-        # wayland-scanner (libwayland-bin), libwayland-dev, and wayland-protocols
-        # at configure time alongside the libx*-dev X11 deps.
+        # GLFW builds both backends on the runner. X11 deps come via xorg-dev
+        # (GLFW's recommended metapackage: Xrandr, Xinerama, Xcursor, Xi, Xext,
+        # …). Wayland needs wayland-scanner (libwayland-bin), libwayland-dev, and
+        # wayland-protocols. libxkbcommon-dev is used by both backends and isn't
+        # part of xorg-dev, so it stays explicit.
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc \
-            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev \
+            xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols clang-tidy
 
       - name: Configure
@@ -116,14 +118,14 @@ jobs:
       - name: Install deps
         # mesa-vulkan-drivers ships the lavapipe software ICD;
         # vulkan-validationlayers ships VK_LAYER_KHRONOS_validation; xvfb gives
-        # the GLFW window a virtual X server. The libx*-dev / libwayland* /
-        # wayland-protocols packages are GLFW's X11 + Wayland build deps (same
-        # set as the linux job). The smoke run itself uses X11 via xvfb.
+        # the GLFW window a virtual X server. xorg-dev / libxkbcommon-dev /
+        # libwayland* / wayland-protocols are GLFW's X11 + Wayland build deps
+        # (same set as the linux job). The smoke run itself uses X11 via xvfb.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers xvfb \
-            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev \
+            xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols
 
       - name: Configure
