@@ -275,16 +275,20 @@ void Swapchain::createRenderPass() {
   subpass.pColorAttachments = &colorAttachmentRef;
   subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
-  // External → 0: synchronisation with the imageAvailableSemaphore wait at
-  // COLOR_ATTACHMENT_OUTPUT is what makes the swap-chain image available;
-  // srcAccessMask should be 0 (no prior writes to flush from a real source).
+  // External → 0. The swap-chain (color) image is made available by the
+  // imageAvailableSemaphore wait at COLOR_ATTACHMENT_OUTPUT, so it needs no
+  // color srcAccessMask. The depth image, however, is reused every frame: the
+  // previous frame's depth writes (LATE_FRAGMENT_TESTS) must be made available
+  // before this frame's begin-render-pass layout transition, or synchronization
+  // validation reports a WRITE_AFTER_WRITE hazard (transition vs. prior store).
+  // Hence srcAccessMask carries the depth-attachment write.
   VkSubpassDependency depIn{};
   depIn.srcSubpass = VK_SUBPASS_EXTERNAL;
   depIn.dstSubpass = 0;
   depIn.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-  depIn.srcAccessMask = 0;
+  depIn.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
   depIn.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT |
                        VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT |
                        VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
