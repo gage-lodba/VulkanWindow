@@ -1,0 +1,24 @@
+# Hashes of file build rules.
+95b2003a368312e2fe831a93bd81d5a6 deps/GLFW/src/CMakeFiles/update_mappings
+3d3e89baaa3cecc3d2775464f7059174 deps/GLFW/src/fractional-scale-v1-client-protocol-code.h
+71aaf005b215b2d1b93e3ec06ab7b0a9 deps/GLFW/src/fractional-scale-v1-client-protocol.h
+3f79ba46b22dc05f93bc34808ce2e92b deps/GLFW/src/idle-inhibit-unstable-v1-client-protocol-code.h
+9627306fe72cfd8ff19e00095e6c09d7 deps/GLFW/src/idle-inhibit-unstable-v1-client-protocol.h
+619dadec843b26399a2536674648b03d deps/GLFW/src/pointer-constraints-unstable-v1-client-protocol-code.h
+0b51438cf2dd9f6a41a175fdc188a2a1 deps/GLFW/src/pointer-constraints-unstable-v1-client-protocol.h
+39162769d57b074e7e10d7f27fa477ee deps/GLFW/src/relative-pointer-unstable-v1-client-protocol-code.h
+3223e656ceefbdfce60cc101df3d7255 deps/GLFW/src/relative-pointer-unstable-v1-client-protocol.h
+f813c106d7920aeb64f098ee84a06aa4 deps/GLFW/src/viewporter-client-protocol-code.h
+7e8cc882b1a9e53c3d45fb65fb87c75f deps/GLFW/src/viewporter-client-protocol.h
+cbc9e9fd9f490a857b50b2500d6da007 deps/GLFW/src/wayland-client-protocol-code.h
+96cc9a821bc977b31f57cd28e7893b73 deps/GLFW/src/wayland-client-protocol.h
+56c31039a81709ade2a67083ea3fc4f0 deps/GLFW/src/xdg-activation-v1-client-protocol-code.h
+0659f1e8baf811b4f208dc586b68ee42 deps/GLFW/src/xdg-activation-v1-client-protocol.h
+7b24acc980a099b01b094485072703eb deps/GLFW/src/xdg-decoration-unstable-v1-client-protocol-code.h
+a14be7a3060e3beac1bbe9892efb5fc3 deps/GLFW/src/xdg-decoration-unstable-v1-client-protocol.h
+0171e1403095c27e44a5900cc553c684 deps/GLFW/src/xdg-shell-client-protocol-code.h
+aa627998b76fbe2943c8d80dd6de62b7 deps/GLFW/src/xdg-shell-client-protocol.h
+e7da006f97a7a99badb1d956ee90939e examples/textured_quad/VulkanWindowTexturedQuad_shaders/quad.frag.spv.inc
+aca6e154811d4d3800e3017b014b7c8e examples/textured_quad/VulkanWindowTexturedQuad_shaders/quad.vert.spv.inc
+5008927764aaa19ed0f7483b3529c182 examples/triangle/VulkanWindowTriangle_shaders/triangle.frag.spv.inc
+5dfaf059c91f9edf2f8a0cc3176c67df examples/triangle/VulkanWindowTriangle_shaders/triangle.vert.spv.inc

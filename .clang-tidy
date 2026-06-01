@@ -12,7 +12,7 @@ ImplementationFileExtensions:
   - cc
   - cpp
   - cxx
-HeaderFilterRegex: ''
+HeaderFilterRegex: 'source/.*'
 ExcludeHeaderFilterRegex: ''
 FormatStyle:     none
 User:            Jerimiah

@@ -4,74 +4,112 @@
 #include <imgui_impl_glfw.h>
 #include <imgui_impl_vulkan.h>
 
-#include <array>
+#include <algorithm>
 #include <stdexcept>
 
-ImGuiManager::ImGuiManager(GLFWwindow *window, VkInstance instance,
+// PipelineInfoMain was introduced 2025-09-26 (Dear ImGui v1.92.2). Earlier
+// releases use flat RenderPass/Subpass/MSAASamples fields on
+// ImGui_ImplVulkan_InitInfo and won't compile against this manager.
+static_assert(IMGUI_VERSION_NUM >= 19220,
+              "Dear ImGui >= 1.92.2 is required (PipelineInfoMain).");
+
+ImGuiManager::ImGuiManager(GLFWwindow *window, uint32_t apiVersion,
+                           VkInstance instance,
                            VkPhysicalDevice physicalDevice, VkDevice device,
                            uint32_t queueFamily, VkQueue queue,
                            VkRenderPass renderPass,
                            VkPipelineCache pipelineCache,
-                           uint32_t minImageCount, uint32_t imageCount)
-    : device(device), descriptorPool(VK_NULL_HANDLE) {
-  // Create descriptor pool for ImGui
-  std::array<VkDescriptorPoolSize, 1> poolSizes = {
-      {{.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .descriptorCount = 100}},
-  };
+                           uint32_t minImageCount, uint32_t imageCount,
+                           uint32_t textureSlots,
+                           std::function<void()> styleCallback)
+    : styleCallback(std::move(styleCallback)) {
+  bool contextCreated = false;
+  bool glfwInited = false;
+  bool vulkanInited = false;
 
-  VkDescriptorPoolCreateInfo poolInfo{};
-  poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-  poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  poolInfo.maxSets = 100;
-  poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
-  poolInfo.pPoolSizes = poolSizes.data();
+  try {
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    contextCreated = true;
+    ImGuiIO &io = ImGui::GetIO();
+    io.IniFilename = nullptr;  // Disable layout persistence (stateless UI)
 
-  if (vkCreateDescriptorPool(device, &poolInfo, nullptr, &descriptorPool) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("Failed to create ImGui descriptor pool");
+#ifdef IMGUI_HAS_DOCK
+    // Dear ImGui docking branch: enable docking + multi-viewport. Master-
+    // branch ImGui (no IMGUI_HAS_DOCK) skips this entire block.
+    //
+    // ViewportsEnable spawns OS-level windows for ImGui windows dragged out
+    // of the main viewport. The Vulkan + GLFW backends own all of that
+    // plumbing internally — the renderer only has to call
+    // ImGuiManager::renderPlatformWindows() each frame (handled by
+    // VulkanRenderer::drawFrame between submit and present).
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+#endif
+
+    setupStyle();
+
+    // install_callbacks=true makes the ImGui backend chain its callbacks with
+    // whatever was registered before, so Window::framebufferResizeCallback
+    // (installed during Window construction) keeps firing. If ImGui init is
+    // ever moved earlier than Window setup, that chaining order flips and
+    // resize handling silently breaks.
+    if (!ImGui_ImplGlfw_InitForVulkan(window, true)) {
+      throw std::runtime_error("Failed to initialize ImGui GLFW backend");
+    }
+    glfwInited = true;
+
+    ImGui_ImplVulkan_InitInfo initInfo{};
+    initInfo.ApiVersion = apiVersion;
+    initInfo.Instance = instance;
+    initInfo.PhysicalDevice = physicalDevice;
+    initInfo.Device = device;
+    initInfo.QueueFamily = queueFamily;
+    initInfo.Queue = queue;
+    initInfo.PipelineCache = pipelineCache;
+    // Let the backend create and own a correctly-typed descriptor pool rather
+    // than hand-rolling one. ImGui 1.92 split the texture descriptor from a
+    // single COMBINED_IMAGE_SAMPLER into separate SAMPLED_IMAGE + SAMPLER
+    // descriptors; delegating pool creation (via DescriptorPoolSize, with
+    // DescriptorPool left null) keeps us correct across future backend
+    // descriptor changes. DescriptorPoolSize is the SAMPLED_IMAGE budget:
+    // `textureSlots` user textures + 1 for the font atlas, floored at the
+    // backend's documented minimum so a small slot count can't trip its assert.
+    initInfo.DescriptorPool = VK_NULL_HANDLE;
+    initInfo.DescriptorPoolSize = std::max(
+        textureSlots + 1,
+        static_cast<uint32_t>(IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE));
+    initInfo.PipelineInfoMain.RenderPass = renderPass;
+    initInfo.PipelineInfoMain.Subpass = 0;
+    initInfo.MinImageCount = minImageCount;
+    initInfo.ImageCount = imageCount;
+    initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    // For secondary viewports (multi-viewport). Backend creates the swap-
+    // chain + render pass per viewport; we just pin the sample count.
+    initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+    initInfo.Allocator = nullptr;
+    initInfo.CheckVkResultFn = nullptr;
+
+    if (!ImGui_ImplVulkan_Init(&initInfo)) {
+      throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
+    }
+    vulkanInited = true;
+  } catch (...) {
+    // ImGui_ImplVulkan_Shutdown destroys the backend-owned descriptor pool, so
+    // no separate pool teardown is needed on the failure path.
+    if (vulkanInited) ImGui_ImplVulkan_Shutdown();
+    if (glfwInited) ImGui_ImplGlfw_Shutdown();
+    if (contextCreated) ImGui::DestroyContext();
+    throw;
   }
-
-  // Setup ImGui context
-  IMGUI_CHECKVERSION();
-  ImGui::CreateContext();
-  ImGuiIO &io = ImGui::GetIO();
-  io.IniFilename = nullptr;  // Disable layout persistence (stateless UI)
-
-  // Setup default ImGui style (can be overridden via setStyleCallback)
-  setupStyle();
-
-  // Initialize ImGui for GLFW
-  ImGui_ImplGlfw_InitForVulkan(window, true);
-
-  // Initialize ImGui for Vulkan
-  ImGui_ImplVulkan_InitInfo initInfo{};
-  initInfo.Instance = instance;
-  initInfo.PhysicalDevice = physicalDevice;
-  initInfo.Device = device;
-  initInfo.QueueFamily = queueFamily;
-  initInfo.Queue = queue;
-  initInfo.PipelineCache = pipelineCache;
-  initInfo.DescriptorPool = descriptorPool;
-  initInfo.PipelineInfoMain.RenderPass = renderPass;
-  initInfo.PipelineInfoMain.Subpass = 0;
-  initInfo.MinImageCount = minImageCount;
-  initInfo.ImageCount = imageCount;
-  initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
-  initInfo.Allocator = nullptr;
-  initInfo.CheckVkResultFn = nullptr;
-
-  ImGui_ImplVulkan_Init(&initInfo);
 }
 
 ImGuiManager::~ImGuiManager() {
+  // ImGui_ImplVulkan_Shutdown also destroys the descriptor pool the backend
+  // created from DescriptorPoolSize.
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();
   ImGui::DestroyContext();
-
-  if (descriptorPool != VK_NULL_HANDLE) {
-    vkDestroyDescriptorPool(device, descriptorPool, nullptr);
-  }
 }
 
 void ImGuiManager::newFrame() {
@@ -83,6 +121,25 @@ void ImGuiManager::newFrame() {
 void ImGuiManager::render(VkCommandBuffer commandBuffer) {
   ImGui::Render();
   ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), commandBuffer);
+}
+
+void ImGuiManager::renderPlatformWindows() {
+#ifdef IMGUI_HAS_VIEWPORT
+  ImGuiIO &io = ImGui::GetIO();
+  if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    // Spawns/destroys/resizes platform windows for secondary viewports, then
+    // dispatches each viewport's Renderer_RenderWindow + Platform_RenderWindow
+    // callbacks installed by the Vulkan/GLFW backends. Each secondary viewport
+    // submits and presents its own commands; we don't have to thread them
+    // through our own queue.
+    ImGui::UpdatePlatformWindows();
+    ImGui::RenderPlatformWindowsDefault();
+  }
+#endif
+}
+
+void ImGuiManager::setMinImageCount(uint32_t minImageCount) {
+  ImGui_ImplVulkan_SetMinImageCount(minImageCount);
 }
 
 void ImGuiManager::setStyleCallback(std::function<void()> callback) {
@@ -112,4 +169,17 @@ void ImGuiManager::setupStyle() {
   style->Colors[ImGuiCol_Button] = ImColor(1.0f, 1.0f, 1.0f, 0.125f);
   style->Colors[ImGuiCol_ButtonHovered] = ImColor(1.0f, 1.0f, 1.0f, 0.25f);
   style->Colors[ImGuiCol_ButtonActive] = ImColor(1.0f, 1.0f, 1.0f, 0.5f);
+
+#ifdef IMGUI_HAS_VIEWPORT
+  // When viewports are enabled an ImGui window dragged out becomes a real OS
+  // window. Rounded corners look wrong against a rectangular OS frame, and a
+  // translucent WindowBg blends with whatever's behind the host window. The
+  // ImGui docs' recommended adjustment is to square the rounding and force
+  // full opacity in that mode.
+  ImGuiIO &io = ImGui::GetIO();
+  if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
+    style->WindowRounding = 0.f;
+    style->Colors[ImGuiCol_WindowBg].w = 1.f;
+  }
+#endif
 }

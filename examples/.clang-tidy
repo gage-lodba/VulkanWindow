@@ -1,0 +1,6 @@
+# Example code favours compact, Vulkan-style aggregate initialisation (vertex
+# arrays, small descriptor structs) and embeds SPIR-V as raw uint32_t arrays.
+# Relax the two modernize checks that fight that for demo readability; the
+# library sources under source/ keep the full strict config.
+InheritParentConfig: true
+Checks: '-modernize-avoid-c-arrays,-modernize-use-designated-initializers'

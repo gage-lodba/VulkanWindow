@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
+    paths:
+      - '.github/workflows/**'
+      - 'source/**'
+      - 'CMakeLists.txt'
+  pull_request:
     paths:
       - '.github/workflows/**'
       - 'source/**'
@@ -14,32 +21,42 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install Vulkan SDK
+      - name: Resolve Vulkan SDK version
+        id: vksdk
+        shell: pwsh
         run: |
-          Start-BitsTransfer -Source https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -Destination ./vulkan_sdk.exe
+          Invoke-WebRequest -Uri https://vulkan.lunarg.com/sdk/latest/windows.json -OutFile windows.json
+          $version = (Get-Content windows.json | ConvertFrom-Json).windows
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "VULKAN_SDK=C:\VulkanSDK\$version" >> $env:GITHUB_ENV
+
+      - name: Cache Vulkan SDK
+        id: cache-vulkan-sdk
+        uses: actions/cache@v4
+        with:
+          path: C:\VulkanSDK\${{ steps.vksdk.outputs.version }}
+          key: vulkan-sdk-windows-${{ steps.vksdk.outputs.version }}
+
+      - name: Install Vulkan SDK
+        if: steps.cache-vulkan-sdk.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Start-BitsTransfer -Source https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -Destination vulkan_sdk.exe
           .\vulkan_sdk.exe --accept-licenses --default-answer --confirm-command install
 
-      - name: Configure for windows
-        run: |
-          Invoke-WebRequest -Uri https://vulkan.lunarg.com/sdk/latest/windows.json -OutFile .\windows.json
-          $env:VULKAN_VERSION = (Get-Content windows.json | ConvertFrom-Json).windows
-          $env:VULKAN_SDK = "C:\VulkanSDK\$env:VULKAN_VERSION"
-          $env:VK_SDK_PATH = "C:\VulkanSDK\$env:VULKAN_VERSION"
-          $env:Vulkan_LIBRARY = "C:\VulkanSDK\$env:VULKAN_VERSION\Lib\vulkan-1.lib"
-          $env:Vulkan_INCLUDE_DIR = "C:\VulkanSDK\$env:VULKAN_VERSION\Include"
-          Import-Module $env:ChocolateyInstall\helpers\chocolateyProfile.psm1
-          refreshenv
-          cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure
+        shell: pwsh
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build release
+      - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: windows-latest
           path: build/Release/VulkanWindow.exe
@@ -48,46 +65,125 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Update packages
+      - name: Install build deps
+        # glslc (shaderc) compiles the examples' shaders; without it
+        # vulkanwindow_add_shaders() guards make examples/ return() early and
+        # the example targets are never built here — so example regressions
+        # would slip past CI. With it, `cmake --build` compiles them too.
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib libglfw3-dev vulkan-tools libvulkan-dev libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
+          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev clang-tidy
 
-      - name: Configure for linux
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Configure
+        # Emit compile_commands.json for clang-tidy.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 
-      - name: Build release
+      - name: Build
         run: cmake --build build --config Release
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v6
+      - name: Run clang-tidy
+        # Lint our sources only — skip deps/ headers. -quiet keeps the log
+        # readable; warnings still fail the job via -warnings-as-errors=*.
+        # `|| true` is NOT used: a clang-tidy diagnostic should fail CI.
+        run: |
+          run-clang-tidy -p build -quiet -warnings-as-errors='*' \
+            "$(pwd)/source/.*\.(cpp|h)$"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
         with:
           name: ubuntu-latest
           path: build/VulkanWindow
 
-  release:
-    name: Release
-    runs-on: [ubuntu-latest]
-    needs: [windows, linux]
+  smoke:
+    name: Smoke test (lavapipe + validation)
+    runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install deps
+        # mesa-vulkan-drivers ships the lavapipe software ICD;
+        # vulkan-validationlayers ships VK_LAYER_KHRONOS_validation; xvfb gives
+        # the GLFW window a virtual X server. The libx*-dev packages are GLFW's
+        # X11 build deps (same set as the linux job).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers xvfb \
+            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
+
+      - name: Configure
+        # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
+        # validation (see VulkanContext / VulkanRenderer).
+        run: cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build-debug --config Debug
+
+      - name: Run headless under lavapipe with validation
+        # Renders a fixed number of frames then exits; aborts with a non-zero
+        # status on any validation error or synchronization-validation hazard,
+        # so a regression that compiles and lints clean still fails CI.
+        run: |
+          set -euo pipefail
+
+          # Force Mesa's software rasterizer — the runners have no GPU.
+          LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
+          if [ -z "$LVP" ]; then
+            echo "::error::lavapipe ICD not found"
+            ls -la /usr/share/vulkan/icd.d/ || true
+            exit 1
+          fi
+          export VK_ICD_FILENAMES="$LVP" VK_DRIVER_FILES="$LVP"
+          echo "lavapipe ICD: $LVP"
+
+          # Guard against a false pass where the validation layer is missing and
+          # the app silently runs without it.
+          ls /usr/share/vulkan/explicit_layer.d/ | grep -qi validation \
+            || { echo "::error::validation layer manifest not installed"; exit 1; }
+
+          export VULKANWINDOW_MAX_FRAMES=120
+          export VULKANWINDOW_VALIDATION_ABORT=1
+
+          xvfb-run -a ./build-debug/VulkanWindow 2>&1 | tee run.log
+
+          if grep -q "running without validation" run.log; then
+            echo "::error::validation layer was not active — smoke test is meaningless"
+            exit 1
+          fi
+          echo "Smoke test passed: 120 frames under lavapipe, validation active, no errors."
+
+  release:
+    name: Release
+    # Only publish a Release when a v* tag is pushed — not on every commit to
+    # main. Pull-request builds also skip this job.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    needs: [windows, linux, smoke]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Download artifacts
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v4
 
-      - name: Release Build
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          name: Release
-          tag_name: ${{ github.run_id }}
+          name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
           body: |
-            **This release has been built by Github Actions**
-            [Link to build](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+            **Built by GitHub Actions**
+            [Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
           files: |
             ubuntu-latest/VulkanWindow
             windows-latest/VulkanWindow.exe
