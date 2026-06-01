@@ -2,16 +2,14 @@ name: Build and Release
 
 on:
   push:
+    # No paths filter here: a v* tag usually points at an already-pushed commit,
+    # so a tag push carries no "changed files" and a paths filter would skip the
+    # whole run — including the release job. Branch-push noise is filtered on the
+    # pull_request side instead.
     branches:
       - main
     tags:
       - 'v*'
-    paths:
-      - '.github/workflows/**'
-      - 'source/**'
-      - 'examples/**'
-      - 'cmake/**'
-      - 'CMakeLists.txt'
   pull_request:
     paths:
       - '.github/workflows/**'
