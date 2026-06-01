@@ -9,12 +9,22 @@ on:
     paths:
       - '.github/workflows/**'
       - 'source/**'
+      - 'examples/**'
+      - 'cmake/**'
       - 'CMakeLists.txt'
   pull_request:
     paths:
       - '.github/workflows/**'
       - 'source/**'
+      - 'examples/**'
+      - 'cmake/**'
       - 'CMakeLists.txt'
+
+concurrency:
+  # Cancel superseded runs on the same ref. Distinct refs get distinct groups,
+  # so a tag's release run is never cancelled by a later push to main.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   windows:
@@ -85,18 +95,39 @@ jobs:
             xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols clang-tidy
 
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ${{ github.job }}
+
       - name: Configure
-        # Emit compile_commands.json for clang-tidy.
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+        # Emit compile_commands.json for clang-tidy; route the compilers through
+        # ccache so unchanged deps (GLFW/ImGui/VMA) aren't recompiled each run.
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Verify examples built
+        # glslc is installed, so the example targets MUST exist. If they don't,
+        # vulkanwindow_add_shaders()'s guard silently return()'d — fail rather
+        # than let a no-examples build pass green.
+        run: |
+          for b in build/examples/triangle/VulkanWindowTriangle \
+                   build/examples/textured_quad/VulkanWindowTexturedQuad; do
+            test -x "$b" || { echo "::error::expected example binary missing: $b"; exit 1; }
+          done
+
       - name: Run clang-tidy
         # Lint our sources only — skip deps/ headers. -quiet keeps the log
         # readable; warnings still fail the job via -warnings-as-errors=*.
-        # `|| true` is NOT used: a clang-tidy diagnostic should fail CI.
+        # `|| true` is NOT used: a clang-tidy diagnostic should fail CI. Strip
+        # the ccache launcher prefix from the compile DB first, or clang-tidy
+        # mistakes "ccache" for the compiler.
         run: |
+          sed -i 's/"command": "ccache /"command": "/' build/compile_commands.json
           run-clang-tidy -p build -quiet -warnings-as-errors='*' \
             "$(pwd)/source/.*\.(cpp|h)$"
 
@@ -121,17 +152,26 @@ jobs:
         # the GLFW window a virtual X server. xorg-dev / libxkbcommon-dev /
         # libwayland* / wayland-protocols are GLFW's X11 + Wayland build deps
         # (same set as the linux job). The smoke run itself uses X11 via xvfb.
+        # glslc builds the examples' shaders so they're smoke-tested too.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers xvfb \
+            libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers xvfb glslc \
             xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols
 
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ${{ github.job }}
+
       - name: Configure
         # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
-        # validation (see VulkanContext / VulkanRenderer).
-        run: cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug
+        # validation (see VulkanContext / VulkanRenderer). ccache skips
+        # recompiling unchanged deps across runs.
+        run: |
+          cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build-debug --config Debug
@@ -139,7 +179,9 @@ jobs:
       - name: Run headless under lavapipe with validation
         # Renders a fixed number of frames then exits; aborts with a non-zero
         # status on any validation error or synchronization-validation hazard,
-        # so a regression that compiles and lints clean still fails CI.
+        # so a regression that compiles and lints clean still fails CI. Runs the
+        # demo AND both examples — the examples exercise the consumer-facing
+        # buffer / texture / descriptor / pipeline paths the demo doesn't.
         run: |
           set -euo pipefail
 
@@ -161,13 +203,25 @@ jobs:
           export VULKANWINDOW_MAX_FRAMES=120
           export VULKANWINDOW_VALIDATION_ABORT=1
 
-          xvfb-run -a ./build-debug/VulkanWindow 2>&1 | tee run.log
-
-          if grep -q "running without validation" run.log; then
-            echo "::error::validation layer was not active — smoke test is meaningless"
-            exit 1
-          fi
-          echo "Smoke test passed: 120 frames under lavapipe, validation active, no errors."
+          bins=(
+            ./build-debug/VulkanWindow
+            ./build-debug/examples/triangle/VulkanWindowTriangle
+            ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad
+          )
+          for bin in "${bins[@]}"; do
+            if [ ! -x "$bin" ]; then
+              echo "::error::expected smoke binary missing: $bin (glslc not found at configure?)"
+              exit 1
+            fi
+            echo "=== smoke: $bin ==="
+            # timeout guards against a hang; the binary self-exits at 120 frames.
+            timeout 180 xvfb-run -a "$bin" 2>&1 | tee run.log
+            if grep -q "running without validation" run.log; then
+              echo "::error::validation layer was not active for $bin — smoke test is meaningless"
+              exit 1
+            fi
+          done
+          echo "Smoke test passed: demo + 2 examples, 120 frames each under lavapipe, validation active, no errors."
 
   release:
     name: Release
