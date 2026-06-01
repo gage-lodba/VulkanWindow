@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/VulkanWindowDemo.dir/link.d CMakeFiles/VulkanWindowDemo.dir/source/main.cpp.o -o VulkanWindow  libVulkanWindow.a libimgui.a deps/GLFW/src/libglfw3.a /usr/lib/librt.a -lm -ldl /usr/lib/libvulkan.so

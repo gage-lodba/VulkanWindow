@@ -74,9 +74,14 @@ jobs:
         # vulkanwindow_add_shaders() guards make examples/ return() early and
         # the example targets are never built here — so example regressions
         # would slip past CI. With it, `cmake --build` compiles them too.
+        # GLFW enables its Wayland backend on the runner, which needs
+        # wayland-scanner (libwayland-bin), libwayland-dev, and wayland-protocols
+        # at configure time alongside the libx*-dev X11 deps.
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev clang-tidy
+          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc \
+            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin wayland-protocols clang-tidy
 
       - name: Configure
         # Emit compile_commands.json for clang-tidy.
@@ -111,13 +116,15 @@ jobs:
       - name: Install deps
         # mesa-vulkan-drivers ships the lavapipe software ICD;
         # vulkan-validationlayers ships VK_LAYER_KHRONOS_validation; xvfb gives
-        # the GLFW window a virtual X server. The libx*-dev packages are GLFW's
-        # X11 build deps (same set as the linux job).
+        # the GLFW window a virtual X server. The libx*-dev / libwayland* /
+        # wayland-protocols packages are GLFW's X11 + Wayland build deps (same
+        # set as the linux job). The smoke run itself uses X11 via xvfb.
         run: |
           sudo apt-get update
           sudo apt-get install -y \
             libvulkan-dev vulkan-validationlayers mesa-vulkan-drivers xvfb \
-            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev
+            libxkbcommon-dev libxinerama-dev libxcursor-dev libxi-dev \
+            libwayland-dev libwayland-bin wayland-protocols
 
       - name: Configure
         # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization

@@ -1,1 +1,0 @@
-/usr/bin/c++ -g -Wl,--dependency-file=CMakeFiles/VulkanWindowTriangle.dir/link.d CMakeFiles/VulkanWindowTriangle.dir/main.cpp.o -o VulkanWindowTriangle  ../../libVulkanWindow.a ../../libimgui.a ../../deps/GLFW/src/libglfw3.a /usr/lib/librt.a -lm -ldl /usr/lib/libvulkan.so
