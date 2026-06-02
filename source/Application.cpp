@@ -13,7 +13,8 @@
 Application::Application() : Application(DEFAULT_WIDTH, DEFAULT_HEIGHT) {}
 
 Application::Application(int width, int height, bool resizable,
-                         std::string_view title, uint32_t framesInFlight) {
+                         std::string_view title, uint32_t framesInFlight,
+                         SurfaceFormatPreference formatPreference) {
   if (width <= 0 || height <= 0) {
     throw std::invalid_argument("Application width/height must be > 0");
   }
@@ -25,8 +26,10 @@ Application::Application(int width, int height, bool resizable,
   // run, so we must release the GLFW refcount here to avoid leaking it.
   try {
     window = std::make_unique<Window>(width, height, title, resizable);
+    // The title doubles as the per-app pipeline-cache namespace.
     renderer = std::make_unique<VulkanRenderer>(
-        window->getGLFWWindow(), PresentMode::Vsync, framesInFlight);
+        window->getGLFWWindow(), PresentMode::Vsync, framesInFlight,
+        formatPreference, title);
   } catch (...) {
     renderer.reset();
     window.reset();
@@ -74,6 +77,10 @@ void Application::setRenderCallback(
 
 void Application::setStyleCallback(std::function<void()> callback) {
   renderer->setStyleCallback(std::move(callback));
+}
+
+void Application::setFontCallback(std::function<void()> callback) {
+  renderer->setFontCallback(std::move(callback));
 }
 
 void Application::setSwapchainRecreatedCallback(

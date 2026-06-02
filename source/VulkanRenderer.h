@@ -9,24 +9,14 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string_view>
 #include <vector>
+
+#include "RendererTypes.h"  // PresentMode, SurfaceFormatPreference
 
 class ImGuiManager;
 class Swapchain;
 class VulkanContext;
-
-/// Preferred swap-chain present mode. The renderer falls back to
-/// VK_PRESENT_MODE_FIFO_KHR (vsync, always supported) when the preferred mode
-/// isn't available.
-enum class PresentMode {
-  /// VK_PRESENT_MODE_FIFO_KHR — vsync. Lowest GPU/power usage. Default.
-  Vsync,
-  /// VK_PRESENT_MODE_MAILBOX_KHR — tear-free, lower latency than FIFO. Burns
-  /// GPU rendering frames that are then discarded.
-  Mailbox,
-  /// VK_PRESENT_MODE_IMMEDIATE_KHR — no vsync. Tearing, lowest latency.
-  Immediate,
-};
 
 /// Details handed to the swap-chain-recreated callback.
 struct SwapchainRecreateInfo {
@@ -43,9 +33,11 @@ struct SwapchainRecreateInfo {
 
 class VulkanRenderer {
  public:
-  explicit VulkanRenderer(GLFWwindow *window,
-                          PresentMode presentMode = PresentMode::Vsync,
-                          uint32_t framesInFlight = 2);
+  explicit VulkanRenderer(
+      GLFWwindow *window, PresentMode presentMode = PresentMode::Vsync,
+      uint32_t framesInFlight = 2,
+      SurfaceFormatPreference formatPreference = SurfaceFormatPreference::Unorm,
+      std::string_view appName = "VulkanWindow");
   ~VulkanRenderer();
 
   VulkanRenderer(const VulkanRenderer &) = delete;
@@ -87,6 +79,14 @@ class VulkanRenderer {
   /// Must be called from the thread that drives drawFrame(); not safe to
   /// invoke concurrently with drawFrame().
   void setStyleCallback(std::function<void()> callback);
+
+  /// Set a callback that loads custom fonts into ImGui's atlas. Applied
+  /// immediately, and re-applied after a swap-chain rebuild that recreates the
+  /// ImGui context (e.g. a surface-format change) so the fonts persist. Inside
+  /// it, add fonts via `ImGui::GetIO().Fonts->AddFontFromFileTTF(path, sizePx)`
+  /// — Dear ImGui (>= 1.92) uploads the atlas lazily, so no manual texture
+  /// build is needed. Must be called from the thread that drives drawFrame().
+  void setFontCallback(std::function<void()> callback);
 
   /// Set a callback invoked right after the swap-chain is rebuilt (resize,
   /// present-mode switch, or surface-format change). The device is idle when it
@@ -170,6 +170,7 @@ class VulkanRenderer {
   std::function<void()> uiCallback;
   std::function<void(VkCommandBuffer, VkExtent2D)> renderCallback;
   std::function<void()> styleCallback;
+  std::function<void()> fontCallback;
   std::function<void(const SwapchainRecreateInfo &)> swapchainRecreatedCallback;
 
   // Number of frames the CPU may queue ahead of the GPU. Sized at construction;

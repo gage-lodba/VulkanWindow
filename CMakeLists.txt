@@ -93,12 +93,19 @@ if(NOT TARGET imgui)
     deps/ImGui/backends/imgui_impl_vulkan.cpp
     deps/ImGui/backends/imgui_impl_vulkan.h
     deps/ImGui/backends/imgui_impl_glfw.cpp
-    deps/ImGui/backends/imgui_impl_glfw.h)
+    deps/ImGui/backends/imgui_impl_glfw.h
+    # std::string overloads for InputText etc. Compiled in (and its dir put on
+    # the include path below) so consumers can `#include "imgui_stdlib.h"`
+    # without reaching into the nested submodule path themselves.
+    deps/ImGui/misc/cpp/imgui_stdlib.cpp
+    deps/ImGui/misc/cpp/imgui_stdlib.h)
   target_include_directories(imgui PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/backends>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/misc/cpp>
     $<INSTALL_INTERFACE:include/VulkanWindow/imgui>
-    $<INSTALL_INTERFACE:include/VulkanWindow/imgui/backends>)
+    $<INSTALL_INTERFACE:include/VulkanWindow/imgui/backends>
+    $<INSTALL_INTERFACE:include/VulkanWindow/imgui/misc/cpp>)
   # Backends need GLFW headers and Vulkan; pinning these PUBLIC means
   # consumers linking imgui get the transitive deps for free.
   target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)

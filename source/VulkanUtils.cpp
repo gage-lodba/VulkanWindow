@@ -1,5 +1,6 @@
 #include "VulkanUtils.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -73,6 +74,25 @@ auto vkResultString(VkResult r) -> const char * {
 void vkCheck(VkResult r, const char *what) {
   if (r != VK_SUCCESS) {
     throw std::runtime_error(std::string(what) + ": " + vkResultString(r));
+  }
+}
+
+auto srgbToLinear(float channel) -> float {
+  return channel <= 0.04045f
+             ? channel / 12.92f
+             : std::pow((channel + 0.055f) / 1.055f, 2.4f);
+}
+
+auto isSrgbFormat(VkFormat format) -> bool {
+  switch (format) {
+    case VK_FORMAT_R8G8B8A8_SRGB:
+    case VK_FORMAT_B8G8R8A8_SRGB:
+    case VK_FORMAT_R8G8B8_SRGB:
+    case VK_FORMAT_B8G8R8_SRGB:
+    case VK_FORMAT_A8B8G8R8_SRGB_PACK32:
+      return true;
+    default:
+      return false;
   }
 }
 

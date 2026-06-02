@@ -159,11 +159,14 @@ Textures come with the same one-call treatment — staged upload, layout
 transitions, optional mipmaps, and a view, all handled for you:
 
 ```cpp
-// pixels: width*height RGBA8 texels (e.g. from stb_image).
+// pixels: width*height RGBA8 texels (e.g. from stb_image). Use a *_UNORM
+// format to show the texels verbatim on the default Unorm swap-chain; use a
+// *_SRGB format only if the texture feeds linear-space lighting (and an Srgb
+// swap-chain) — see "Surface format and ImGui colours".
 vkutil::Image tex = vkutil::createTexture2D(
     ctx.allocator, ctx.physicalDevice, ctx.device, ctx.graphicsQueue,
     ctx.graphicsQueueFamily, pixels, width * height * 4, width, height,
-    VK_FORMAT_R8G8B8A8_SRGB, /*generateMipmaps=*/true);
+    VK_FORMAT_R8G8B8A8_UNORM, /*generateMipmaps=*/true);
 VkSampler sampler = vkutil::createSampler(ctx.device);
 
 // tex.view + sampler go into a combined-image-sampler descriptor...
@@ -237,8 +240,9 @@ version).
 | `setUICallback(fn)` | Invoked each frame between `ImGui::NewFrame()` and `ImGui::Render()` for app ImGui draws. |
 | `setRenderCallback(fn)` | Invoked inside the render pass, before ImGui, with the command buffer + swap-chain extent for app geometry. |
 | `setStyleCallback(fn)` | Replaces the built-in ImGui dark theme. Applied immediately. |
+| `setFontCallback(fn)` | Loads custom fonts into ImGui's atlas (`ImGui::GetIO().Fonts->AddFontFromFileTTF(...)`). Applied immediately and re-applied after an ImGui-context rebuild, so fonts persist. |
 | `setSwapchainRecreatedCallback(fn)` | Fired after a swap-chain rebuild (resize / present-mode / format change) with a `SwapchainRecreateInfo`. Device is idle; rebuild format-/extent-dependent resources here. |
-| `setClearColor(r, g, b, a)` | Linear-RGBA colour cleared at frame start. Default is opaque black. |
+| `setClearColor(r, g, b, a)` | RGBA colour cleared at frame start. Presented verbatim with the default `Unorm` surface (matches ImGui's colours); treated as linear and GPU-encoded with an `Srgb` surface. Default is opaque black. |
 | `setPresentMode(mode)` | Switch between `Vsync` / `Mailbox` / `Immediate` at runtime; triggers a swap-chain rebuild. |
 | `setKeyCallback(fn)` | GLFW key events. ImGui's chained handlers continue to fire. |
 | `setCursorPosCallback(fn)` / `setMouseButtonCallback(fn)` / `setScrollCallback(fn)` / `setCharCallback(fn)` | Other input events. |
@@ -251,6 +255,32 @@ ImGui's GLFW backend chains alongside the user's callbacks, so events ImGui
 consumed (text input into a focused widget, mouse over a window) fire on both
 paths. If the app should ignore those, filter on
 `ImGui::GetIO().WantCaptureKeyboard` / `WantCaptureMouse`.
+
+The bundled `imgui` target compiles `imgui_stdlib` and puts it on the include
+path, so `#include "imgui_stdlib.h"` and `ImGui::InputText(label, &std::string)`
+work out of the box.
+
+### Surface format and ImGui colours
+
+The `Application` constructor takes a `SurfaceFormatPreference` (last argument,
+default `Unorm`):
+
+```cpp
+Application app(800, 600, /*resizable=*/true, "My App", /*framesInFlight=*/2,
+                SurfaceFormatPreference::Srgb);  // opt into an sRGB swap-chain
+```
+
+- **`Unorm`** (default) — colours written to the swap-chain (ImGui's vertex
+  colours, `setClearColor`) are presented **verbatim**. Dear ImGui is not
+  gamma-correct by design and expects exactly this, so the built-in theme and
+  any colours you author display as specified. Best for UI-centric apps.
+- **`Srgb`** — the GPU gamma-encodes (linear → sRGB) on write, which is correct
+  for linear-space 3D lighting/blending. ImGui's sRGB-authored colours must be
+  linearised: the scaffold linearises its **built-in theme** for you, but your
+  own `ImGuiCol_*` / `PushStyleColor` values need
+  `vkutil::srgbToLinear` (declared in `VulkanUtils.h`).
+
+Read the format actually chosen from `app.getSwapchain().imageFormat`.
 
 ### Building your own pipelines
 
@@ -317,8 +347,9 @@ Application
 ```
 
 - **`VulkanContext`** owns long-lived Vulkan state that doesn't depend on the
-  swap-chain. Survives swap-chain rebuilds. Pipeline cache is persisted to a
-  per-user cache directory across runs.
+  swap-chain. Survives swap-chain rebuilds. Pipeline cache is persisted across
+  runs to a per-user cache directory, namespaced by the window title so apps
+  built on the library don't share one cache file.
 - **`VulkanRenderer`** owns the swap-chain, depth attachment, render pass,
   framebuffers, command pool/buffers, sync primitives, and `ImGuiManager`.
   Handles resize via `recreateSwapChain()`.

@@ -7,6 +7,8 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
+#include <string_view>
 #include <vector>
 
 // Forward declarations for VMA opaque handle types so consumers don't have to
@@ -28,9 +30,13 @@ class VulkanContext {
   /// Construct the context against the given GLFW window. Throws on any
   /// Vulkan-init failure; if the constructor throws, no resources are leaked.
   /// `enableBestPracticesValidation` only takes effect in Debug builds; ignored
-  /// when validation layers are unavailable.
+  /// when validation layers are unavailable. `appName` namespaces the on-disk
+  /// pipeline-cache directory so apps built on this library don't share one
+  /// cache file; it's sanitised to a filesystem-safe name (falling back to
+  /// "VulkanWindow" if empty).
   explicit VulkanContext(GLFWwindow *window,
-                         bool enableBestPracticesValidation = false);
+                         bool enableBestPracticesValidation = false,
+                         std::string_view appName = "VulkanWindow");
   ~VulkanContext();
 
   VulkanContext(const VulkanContext &) = delete;
@@ -84,6 +90,10 @@ class VulkanContext {
       -> std::vector<const char *>;
   [[nodiscard]] static auto rateDeviceSuitability(VkPhysicalDevice physDevice)
       -> int;
+
+  // Filesystem-safe per-app name for the pipeline-cache directory. Set once in
+  // the constructor from the `appName` argument.
+  std::string cacheName;
 
   // Tracks state required during init that the renderer doesn't need to see.
   bool validationLayersActive{false};

@@ -20,12 +20,23 @@ using vkutil::vkCheck;
 namespace {
 
 auto chooseSwapSurfaceFormat(
-    const std::vector<VkSurfaceFormatKHR> &availableFormats)
-    -> VkSurfaceFormatKHR {
-  for (const auto &availableFormat : availableFormats) {
-    if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB &&
-        availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-      return availableFormat;
+    const std::vector<VkSurfaceFormatKHR> &availableFormats,
+    SurfaceFormatPreference preference) -> VkSurfaceFormatKHR {
+  // Prefer 32-bit BGRA then RGBA in the requested encoding, all in the standard
+  // sRGB-nonlinear display colour space. UNORM is the default so ImGui's
+  // (non-gamma-corrected) colours present verbatim; SRGB is the opt-in for apps
+  // doing their own linear-space rendering.
+  const std::array<VkFormat, 2> preferred =
+      preference == SurfaceFormatPreference::Srgb
+          ? std::array{VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB}
+          : std::array{VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM};
+
+  for (VkFormat want : preferred) {
+    for (const auto &availableFormat : availableFormats) {
+      if (availableFormat.format == want &&
+          availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
+        return availableFormat;
+      }
     }
   }
   return availableFormats[0];
@@ -92,8 +103,9 @@ auto chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
 }  // namespace
 
 Swapchain::Swapchain(VulkanContext &ctx, GLFWwindow *window,
-                     PresentMode preferred)
-    : ctx(ctx), window(window) {
+                     PresentMode preferred,
+                     SurfaceFormatPreference formatPreference)
+    : ctx(ctx), window(window), formatPreference(formatPreference) {
   try {
     createSwapchain(preferred);
     createImageViews();
@@ -150,7 +162,8 @@ void Swapchain::createSwapchain(PresentMode preferred) {
   SwapChainSupportDetails support =
       querySwapChainSupport(ctx.physicalDevice, ctx.surface);
 
-  VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(support.formats);
+  VkSurfaceFormatKHR surfaceFormat =
+      chooseSwapSurfaceFormat(support.formats, formatPreference);
   VkPresentModeKHR presentMode =
       chooseSwapPresentMode(support.presentModes, preferred);
   VkExtent2D chosenExtent = chooseSwapExtent(support.capabilities, window);

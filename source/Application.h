@@ -7,19 +7,25 @@
 #include <mutex>
 #include <string_view>
 
+#include "RendererTypes.h"  // PresentMode, SurfaceFormatPreference
+
 class VulkanRenderer;
 class Window;
 class VulkanContext;
 class Swapchain;
 struct SwapchainRecreateInfo;
-enum class PresentMode;
 
 class Application {
  public:
   Application();
-  explicit Application(int width, int height, bool resizable = true,
-                       std::string_view title = "Vulkan Window",
-                       uint32_t framesInFlight = 2);
+  /// `formatPreference` selects the swap-chain colour encoding. The default
+  /// (Unorm) presents ImGui colours verbatim — correct for UI-centric apps;
+  /// pass Srgb for linear-space 3D rendering (see SurfaceFormatPreference).
+  /// `title` also names the per-app pipeline-cache directory.
+  explicit Application(
+      int width, int height, bool resizable = true,
+      std::string_view title = "Vulkan Window", uint32_t framesInFlight = 2,
+      SurfaceFormatPreference formatPreference = SurfaceFormatPreference::Unorm);
 
   ~Application();
 
@@ -51,6 +57,16 @@ class Application {
   /// Must be called from the thread that constructed Application; not safe to
   /// invoke concurrently with run().
   void setStyleCallback(std::function<void()> callback);
+
+  /// Set a callback that loads custom fonts into ImGui's atlas. Applied
+  /// immediately, and re-applied automatically after a swap-chain rebuild that
+  /// recreates the ImGui context (e.g. a surface-format change), so the fonts
+  /// persist. Inside the callback add fonts with
+  /// `ImGui::GetIO().Fonts->AddFontFromFileTTF(path, sizePx)` — Dear ImGui
+  /// (>= 1.92) uploads the atlas lazily, so no manual texture build is needed.
+  /// Must be called from the thread that constructed Application; not safe to
+  /// invoke concurrently with run().
+  void setFontCallback(std::function<void()> callback);
 
   /// Set a callback invoked after the swap-chain is rebuilt (resize, present-
   /// mode switch, surface-format change). Use it to recreate pipelines or
@@ -88,7 +104,10 @@ class Application {
   [[nodiscard]] auto getPresentMode() const noexcept -> PresentMode;
 
   /// Set the colour cleared into the swap-chain image at the start of each
-  /// frame. Components are linear in [0, 1]. Default is opaque black.
+  /// frame. Components in [0, 1]. With the default Unorm surface they're
+  /// presented verbatim (treat them as sRGB/display values, matching ImGui's
+  /// colours); with an Srgb surface they're treated as linear and the GPU
+  /// gamma-encodes them. Default is opaque black.
   void setClearColor(float r, float g, float b, float a = 1.0f) noexcept;
 
   // ---- Advanced: direct Vulkan interop ------------------------------------

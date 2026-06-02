@@ -12,7 +12,9 @@
 using vkutil::vkCheck;
 
 VulkanRenderer::VulkanRenderer(GLFWwindow *window, PresentMode presentMode,
-                               uint32_t framesInFlight)
+                               uint32_t framesInFlight,
+                               SurfaceFormatPreference formatPreference,
+                               std::string_view appName)
     : window(window),
       preferredPresentMode(presentMode),
       framesInFlight(framesInFlight) {
@@ -20,10 +22,11 @@ VulkanRenderer::VulkanRenderer(GLFWwindow *window, PresentMode presentMode,
     throw std::invalid_argument("framesInFlight must be > 0");
   }
   try {
-    context = std::make_unique<VulkanContext>(window,
-                                              enableBestPracticesValidation);
-    swapchain =
-        std::make_unique<Swapchain>(*context, window, preferredPresentMode);
+    context = std::make_unique<VulkanContext>(
+        window, enableBestPracticesValidation, appName);
+    swapchain = std::make_unique<Swapchain>(*context, window,
+                                            preferredPresentMode,
+                                            formatPreference);
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
@@ -132,14 +135,21 @@ void VulkanRenderer::recreateImageAvailableSemaphores() {
 }
 
 void VulkanRenderer::createImGui() {
-  // Pass the user's style callback into the constructor so the default
-  // dark theme isn't applied first and then immediately overwritten.
+  // Pass the user's style + font callbacks into the constructor so they're
+  // applied during init rather than after — and so they're re-applied if this
+  // runs again on a swap-chain rebuild (format/image-count change recreates the
+  // ImGui context, which would otherwise drop custom fonts and theme).
+  //
+  // On an sRGB swap-chain ImGui's sRGB-authored colours would wash out, so tell
+  // the manager to linearise the built-in theme to match the format.
+  const bool linearizeStyleColors = vkutil::isSrgbFormat(swapchain->imageFormat);
   imguiManager = std::make_unique<ImGuiManager>(
       window, context->instanceApiVersion, context->instance,
       context->physicalDevice, context->device, context->graphicsQueueFamily,
       context->graphicsQueue, swapchain->renderPass, context->pipelineCache,
       swapchain->minImageCount,
-      static_cast<uint32_t>(swapchain->images.size()), 100, styleCallback);
+      static_cast<uint32_t>(swapchain->images.size()), 100, styleCallback,
+      linearizeStyleColors, fontCallback);
 }
 
 void VulkanRenderer::setPresentMode(PresentMode mode) {
@@ -163,6 +173,13 @@ void VulkanRenderer::setStyleCallback(std::function<void()> callback) {
   styleCallback = std::move(callback);
   if (imguiManager) {
     imguiManager->setStyleCallback(styleCallback);
+  }
+}
+
+void VulkanRenderer::setFontCallback(std::function<void()> callback) {
+  fontCallback = std::move(callback);
+  if (imguiManager) {
+    imguiManager->setFontCallback(fontCallback);
   }
 }
 

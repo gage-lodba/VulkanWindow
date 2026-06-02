@@ -14,6 +14,7 @@ using VmaAllocation = VmaAllocation_T *;
 
 class VulkanContext;
 enum class PresentMode;
+enum class SurfaceFormatPreference;
 
 /// Owns the swap-chain and everything keyed to it: image views, render pass,
 /// depth attachment, and framebuffers. Construction picks surface format /
@@ -36,7 +37,8 @@ class Swapchain {
     VkRenderPass oldRenderPassToDestroy{VK_NULL_HANDLE};
   };
 
-  Swapchain(VulkanContext &ctx, GLFWwindow *window, PresentMode preferred);
+  Swapchain(VulkanContext &ctx, GLFWwindow *window, PresentMode preferred,
+            SurfaceFormatPreference formatPreference);
   ~Swapchain();
 
   Swapchain(const Swapchain &) = delete;
@@ -87,4 +89,8 @@ class Swapchain {
 
   VulkanContext &ctx;
   GLFWwindow *window;
+  // Surface-format encoding preference (UNORM vs sRGB). Fixed at construction
+  // and reused on every recreate() so the format choice is stable across
+  // resizes.
+  SurfaceFormatPreference formatPreference;
 };

@@ -16,6 +16,18 @@ auto vkResultString(VkResult r) -> const char *;
 /// "<what>: <vkResultString(r)>".
 void vkCheck(VkResult r, const char *what);
 
+/// Convert one sRGB-encoded colour channel in [0, 1] to its linear value via
+/// the standard sRGB transfer function. Alpha is not gamma-encoded and should
+/// not be passed through this. Useful when rendering ImGui onto an sRGB
+/// surface (see SurfaceFormatPreference::Srgb): linearise your ImGuiCol_*
+/// values so the GPU's linear→sRGB encode reproduces the authored colour.
+auto srgbToLinear(float channel) -> float;
+
+/// True for the 8-bit sRGB surface formats — the encodings where the GPU
+/// gamma-encodes colour on store. Used to decide whether ImGui's sRGB-authored
+/// colours need linearising for the chosen swap-chain format.
+auto isSrgbFormat(VkFormat format) -> bool;
+
 struct QueueFamilyIndices {
   std::optional<uint32_t> graphicsFamily;
   std::optional<uint32_t> presentFamily;

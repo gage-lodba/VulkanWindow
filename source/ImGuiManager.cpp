@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <stdexcept>
 
+#include "VulkanUtils.h"  // srgbToLinear
+
 // PipelineInfoMain was introduced 2025-09-26 (Dear ImGui v1.92.2). Earlier
 // releases use flat RenderPass/Subpass/MSAASamples fields on
 // ImGui_ImplVulkan_InitInfo and won't compile against this manager.
@@ -21,8 +23,12 @@ ImGuiManager::ImGuiManager(GLFWwindow *window, uint32_t apiVersion,
                            VkPipelineCache pipelineCache,
                            uint32_t minImageCount, uint32_t imageCount,
                            uint32_t textureSlots,
-                           std::function<void()> styleCallback)
-    : styleCallback(std::move(styleCallback)) {
+                           std::function<void()> styleCallback,
+                           bool linearizeStyleColors,
+                           std::function<void()> fontCallback)
+    : styleCallback(std::move(styleCallback)),
+      fontCallback(std::move(fontCallback)),
+      linearizeStyleColors(linearizeStyleColors) {
   bool contextCreated = false;
   bool glfwInited = false;
   bool vulkanInited = false;
@@ -94,6 +100,15 @@ ImGuiManager::ImGuiManager(GLFWwindow *window, uint32_t apiVersion,
       throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
     }
     vulkanInited = true;
+
+    // Load user fonts (if any). With Dear ImGui >= 1.92's dynamic atlas the
+    // Vulkan backend uploads/refreshes the texture lazily each frame, so fonts
+    // can be added here (or later via setFontCallback) with no explicit
+    // ImGui_ImplVulkan_CreateFontsTexture call. `this->` because the parameter
+    // of the same name was just moved into the member.
+    if (this->fontCallback) {
+      this->fontCallback();
+    }
   } catch (...) {
     // ImGui_ImplVulkan_Shutdown destroys the backend-owned descriptor pool, so
     // no separate pool teardown is needed on the failure path.
@@ -150,6 +165,15 @@ void ImGuiManager::setStyleCallback(std::function<void()> callback) {
   }
 }
 
+void ImGuiManager::setFontCallback(std::function<void()> callback) {
+  fontCallback = std::move(callback);
+  // Apply immediately; the Vulkan backend re-uploads the atlas on the next
+  // frame (dynamic font atlas, Dear ImGui >= 1.92).
+  if (fontCallback) {
+    fontCallback();
+  }
+}
+
 void ImGuiManager::setupStyle() {
   if (styleCallback) {
     styleCallback();
@@ -182,4 +206,19 @@ void ImGuiManager::setupStyle() {
     style->Colors[ImGuiCol_WindowBg].w = 1.f;
   }
 #endif
+
+  // On an sRGB swap-chain the GPU applies a linear→sRGB encode on store. ImGui
+  // authors its palette in sRGB, so without compensation every colour is
+  // double-encoded and washes out. Convert the whole palette to linear here so
+  // the hardware encode reproduces the authored colours. Consumer-pushed
+  // ImGuiCol_* / PushStyleColor values aren't covered — apply vkutil::
+  // srgbToLinear to those yourself (see SurfaceFormatPreference::Srgb).
+  if (linearizeStyleColors) {
+    for (ImVec4 &c : style->Colors) {
+      c.x = vkutil::srgbToLinear(c.x);
+      c.y = vkutil::srgbToLinear(c.y);
+      c.z = vkutil::srgbToLinear(c.z);
+      // Alpha is not gamma-encoded; leave it.
+    }
+  }
 }

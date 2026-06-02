@@ -3,6 +3,7 @@
 #include <vk_mem_alloc.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -29,28 +30,85 @@ using vkutil::vkCheck;
 
 namespace {
 
-// Per-user cache directory for the pipeline cache file. Falls back to CWD
-// only when no platform location can be determined.
-auto pipelineCachePath() -> std::filesystem::path {
+// Reduce an app name to a filesystem-safe directory component. Keeps
+// alphanumerics plus a small safe set, maps everything else to '_', and never
+// yields an empty or dot-only name (which would create a bogus cache path).
+auto sanitizeCacheName(std::string_view name) -> std::string {
+  std::string out;
+  out.reserve(name.size());
+  for (char ch : name) {
+    const bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+                    (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
+                    ch == '.' || ch == ' ';
+    out.push_back(ok ? ch : '_');
+  }
+  // Windows strips trailing dots/spaces from path components, so a name like
+  // "App." or "v1.0 " wouldn't round-trip. Drop them; this also collapses "."
+  // and ".." to empty, which falls back below.
+  while (!out.empty() && (out.back() == ' ' || out.back() == '.')) {
+    out.pop_back();
+  }
+  if (out.empty()) {
+    return "VulkanWindow";
+  }
+  return out;
+}
+
+// Per-user cache directory for the pipeline cache file, namespaced by app name
+// so apps built on this library don't collide on one shared file. Falls back to
+// CWD only when no platform location can be determined.
+auto pipelineCachePath(const std::string &appName) -> std::filesystem::path {
   namespace fs = std::filesystem;
 #if defined(_WIN32)
   if (const char *localAppData = std::getenv("LOCALAPPDATA")) {
-    return fs::path(localAppData) / "VulkanWindow" / "pipeline_cache.bin";
+    return fs::path(localAppData) / appName / "pipeline_cache.bin";
   }
 #elif defined(__APPLE__)
   if (const char *home = std::getenv("HOME")) {
-    return fs::path(home) / "Library" / "Caches" / "VulkanWindow" /
+    return fs::path(home) / "Library" / "Caches" / appName /
            "pipeline_cache.bin";
   }
 #else
   if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg && xdg[0] != '\0') {
-    return fs::path(xdg) / "VulkanWindow" / "pipeline_cache.bin";
+    return fs::path(xdg) / appName / "pipeline_cache.bin";
   }
   if (const char *home = std::getenv("HOME")) {
-    return fs::path(home) / ".cache" / "VulkanWindow" / "pipeline_cache.bin";
+    return fs::path(home) / ".cache" / appName / "pipeline_cache.bin";
   }
 #endif
   return {"pipeline_cache.bin"};
+}
+
+// Remove abandoned pipeline-cache temp files (the "<name>.tmp.<pid>" siblings
+// savePipelineCache writes then renames). A process killed between write and
+// rename leaves one behind. Only sweep temps older than a minute so a
+// concurrently-running instance mid-write isn't disturbed — a real write
+// completes in milliseconds. Best-effort: all errors are swallowed.
+void sweepStalePipelineCacheTemps(const std::filesystem::path &cacheFile) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path dir = cacheFile.parent_path();
+  if (dir.empty()) return;
+  const std::string prefix = cacheFile.filename().string() + ".tmp.";
+
+  const auto now = fs::file_time_type::clock::now();
+  constexpr auto staleAfter = std::chrono::minutes(1);
+
+  for (fs::directory_iterator it(dir, ec), end; !ec && it != end;
+       it.increment(ec)) {
+    const std::string filename = it->path().filename().string();
+    if (!filename.starts_with(prefix)) continue;  // not one of our temps
+
+    const auto mtime = fs::last_write_time(it->path(), ec);
+    if (ec) {
+      ec.clear();
+      continue;
+    }
+    if (now - mtime < staleAfter) continue;  // recent — possibly a live writer
+
+    fs::remove(it->path(), ec);
+    ec.clear();
+  }
 }
 
 auto createDebugUtilsMessengerEXT(
@@ -119,7 +177,9 @@ void fillDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &info) {
 }  // namespace
 
 VulkanContext::VulkanContext(GLFWwindow *window,
-                             bool enableBestPracticesValidation) {
+                             bool enableBestPracticesValidation,
+                             std::string_view appName)
+    : cacheName(sanitizeCacheName(appName)) {
   try {
     createInstance(enableBestPracticesValidation);
     setupDebugMessenger();
@@ -520,7 +580,10 @@ void VulkanContext::createPipelineCache() {
 
   // Try to load existing cache from disk
   std::vector<char> cacheData;
-  const std::filesystem::path cachePath = pipelineCachePath();
+  const std::filesystem::path cachePath = pipelineCachePath(cacheName);
+  // Clear out any temp files left by a process killed mid-save (see
+  // savePipelineCache's temp→rename dance).
+  sweepStalePipelineCacheTemps(cachePath);
   std::ifstream cacheFile(cachePath, std::ios::binary | std::ios::ate);
   if (cacheFile.is_open()) {
     auto size = cacheFile.tellg();
@@ -605,7 +668,7 @@ void VulkanContext::savePipelineCache() const {
     return;
   }
 
-  const std::filesystem::path cachePath = pipelineCachePath();
+  const std::filesystem::path cachePath = pipelineCachePath(cacheName);
   std::error_code ec;
   std::filesystem::create_directories(cachePath.parent_path(), ec);
   // Ignore directory-creation errors — opening the file below will fail

@@ -95,12 +95,17 @@ class TexturedQuadExample {
         allocator, device, ctx.graphicsQueue, ctx.graphicsQueueFamily,
         kQuad.data(), sizeof(kQuad), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-    // Texture (mipmapped) + sampler.
+    // Texture (mipmapped) + sampler. UNORM (not _SRGB) so the checkerboard's
+    // authored byte values pass through unchanged to the default Unorm
+    // swap-chain — the shader samples and writes them verbatim. A real sRGB
+    // colour texture feeding a linear-space lit pipeline would instead use an
+    // _SRGB format (and typically an Srgb swap-chain) so the GPU linearises on
+    // sample and re-encodes on store.
     const std::vector<uint8_t> pixels = makeCheckerboard(kTextureSize);
     texture = vkutil::createTexture2D(
         allocator, ctx.physicalDevice, device, ctx.graphicsQueue,
         ctx.graphicsQueueFamily, pixels.data(), pixels.size(), kTextureSize,
-        kTextureSize, VK_FORMAT_R8G8B8A8_SRGB, /*generateMipmaps=*/true);
+        kTextureSize, VK_FORMAT_R8G8B8A8_UNORM, /*generateMipmaps=*/true);
     sampler = vkutil::createSampler(device);
 
     // Descriptor set: one combined image sampler, pointed at the texture.
