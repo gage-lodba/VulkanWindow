@@ -338,6 +338,17 @@ jobs:
           export VK_LAYER_PATH="$(dirname "$VK_LAYER_JSON")"
           echo "Validation layer manifest dir: $VK_LAYER_PATH"
 
+          # The Homebrew manifest's library_path is a bare dylib name, so the
+          # loader hands it straight to dlopen — which fails unless the dylib's
+          # directory is on the dynamic-linker search path. Add it to
+          # DYLD_LIBRARY_PATH. (DYLD_* survives here because every process in
+          # the chain after this export — gtimeout, the test binary — is
+          # unrestricted; only SIP-protected binaries strip it.)
+          VK_LAYER_LIB="$(find "$PREFIX" -name 'libVkLayer_khronos_validation.dylib' 2>/dev/null | head -n1 || true)"
+          test -n "$VK_LAYER_LIB" || { echo "::error::validation layer dylib not found under $PREFIX"; exit 1; }
+          export DYLD_LIBRARY_PATH="$(dirname "$VK_LAYER_LIB")${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          echo "Validation layer dylib dir: $(dirname "$VK_LAYER_LIB")"
+
           export VULKANWINDOW_MAX_FRAMES=120
           export VULKANWINDOW_VALIDATION_ABORT=1
 
