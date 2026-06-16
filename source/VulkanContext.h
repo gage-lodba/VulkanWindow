@@ -95,12 +95,21 @@ class VulkanContext {
   // the constructor from the `appName` argument.
   std::string cacheName;
 
+  // The unsanitised app name, surfaced to the driver via VkApplicationInfo so
+  // vendor tooling / driver profiles can key on it. Set once in the constructor.
+  std::string applicationName;
+
   // Tracks state required during init that the renderer doesn't need to see.
   bool validationLayersActive{false};
   bool validationFeaturesAvailable{false};
   bool getPhysicalDeviceFeatures2Available{false};
   bool needKHRFeatures2Loader{false};
   bool pipelineCacheExternallySyncSupported{false};
+  // VK_KHR_portability_enumeration is exposed by the loader (e.g. when a
+  // MoltenVK portability ICD is installed). When set, the extension is enabled
+  // and VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR is added so portability
+  // devices show up in vkEnumeratePhysicalDevices.
+  bool portabilityEnumerationEnabled{false};
 
   static constexpr std::array deviceExtensions = {
       VK_KHR_SWAPCHAIN_EXTENSION_NAME};

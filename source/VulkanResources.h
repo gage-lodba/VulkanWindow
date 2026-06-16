@@ -29,6 +29,11 @@ struct Buffer {
 /// usage; VK_BUFFER_USAGE_TRANSFER_DST_BIT is added for you. Blocks until the
 /// copy completes (vkQueueWaitIdle), so it's for one-shot / load-time uploads,
 /// not the per-frame hot path. Throws std::runtime_error on failure.
+///
+/// Thread-safety: submits on `queue`, which Vulkan requires be externally
+/// synchronized. Call before VulkanRenderer/Application::run() (or while the
+/// queue is otherwise idle); do NOT call concurrently with drawFrame() on the
+/// same queue — there is no internal locking.
 [[nodiscard]] auto createDeviceLocalBuffer(VmaAllocator allocator,
                                            VkDevice device, VkQueue queue,
                                            uint32_t queueFamily,
@@ -54,6 +59,9 @@ void destroyBuffer(VmaAllocator allocator, Buffer &buffer);
 
 /// End, submit, and wait for a command buffer from beginSingleTimeCommands,
 /// then free it. Blocks on vkQueueWaitIdle. Throws on failure.
+///
+/// Thread-safety: submits on `queue` (externally-synchronized in Vulkan). Don't
+/// call concurrently with drawFrame() on the same queue — no internal locking.
 void endSingleTimeCommands(VkDevice device, VkCommandPool commandPool,
                            VkQueue queue, VkCommandBuffer commandBuffer);
 
@@ -75,6 +83,11 @@ struct Image {
 /// throws otherwise). A transient command pool is created/destroyed internally
 /// and the upload blocks (vkQueueWaitIdle), so this is for load-time use.
 /// Throws std::runtime_error on failure.
+///
+/// Thread-safety: submits on `queue`, which Vulkan requires be externally
+/// synchronized. Call before VulkanRenderer/Application::run() (or while the
+/// queue is otherwise idle); do NOT call concurrently with drawFrame() on the
+/// same queue — there is no internal locking.
 [[nodiscard]] auto createTexture2D(VmaAllocator allocator,
                                    VkPhysicalDevice physicalDevice,
                                    VkDevice device, VkQueue queue,

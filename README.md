@@ -356,22 +356,21 @@ Application
 - **`ImGuiManager`** is the only translation unit that touches
   `imgui_impl_*`.
 
-See [`CLAUDE.md`](CLAUDE.md) for the full architecture notes and
-[`IMPROVEMENTS.md`](IMPROVEMENTS.md) for the backlog.
-
 ## CI
 
-GitHub Actions builds Release configurations on `windows-latest` and
-`ubuntu-latest` and runs `clang-tidy` (with `-warnings-as-errors='*'`) on
-Linux. Binaries are uploaded as workflow artifacts on every push; a GitHub
-Release is published only when a `v*` tag is pushed.
+GitHub Actions builds Release configurations on `windows-latest`,
+`ubuntu-latest`, and `macos-latest` (the macOS build runs against MoltenVK and
+is what compiles the `VK_KHR_portability_*` paths) and runs `clang-tidy` (with
+`-warnings-as-errors='*'`) on Linux. Binaries are uploaded as workflow
+artifacts on every push; a GitHub Release is published only when a `v*` tag is
+pushed.
 
-A **smoke-test** job builds a Debug configuration (validation layers and
-synchronization validation compiled in) and runs the demo headlessly on Linux
-under Mesa **lavapipe** (software Vulkan) inside `xvfb`, with validation
-errors made fatal. This catches runtime regressions — invalid API usage,
-synchronization hazards — that compile and lint cleanly. The release job is
-gated on it.
+Two **smoke-test** jobs build a Debug configuration (validation layers and
+synchronization validation compiled in) and run the demo plus both examples
+headlessly with validation errors made fatal: one on Linux under Mesa
+**lavapipe** (software Vulkan) inside `xvfb`, one on macOS under **MoltenVK**.
+This catches runtime regressions — invalid API usage, synchronization hazards —
+that compile and lint cleanly. The release job is gated on both.
 
 ### Headless / CI environment variables
 

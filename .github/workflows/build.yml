@@ -221,13 +221,135 @@ jobs:
           done
           echo "Smoke test passed: demo + 2 examples, 120 frames each under lavapipe, validation active, no errors."
 
+  macos:
+    name: Build (macOS / MoltenVK)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Vulkan deps (Homebrew)
+        # macOS has no native Vulkan. vulkan-loader is the ICD loader,
+        # molten-vk the Vulkan-over-Metal ICD (the only "device" here),
+        # vulkan-headers the headers find_package(Vulkan) resolves, and shaderc
+        # supplies glslc for the examples' shaders. Homebrew is preferred over
+        # the LunarG SDK installer because it's non-interactive and lands
+        # everything under `brew --prefix`. This is the job that actually
+        # compiles the portability (VK_KHR_portability_*) code paths against a
+        # real MoltenVK ICD — nothing else in CI does.
+        run: |
+          brew update
+          brew install vulkan-headers vulkan-loader molten-vk shaderc
+
+      - name: Configure
+        # Point find_package(Vulkan) at the Homebrew prefix for the loader +
+        # headers. If FindVulkan ever fails to locate them, pin explicitly with
+        # -DVulkan_INCLUDE_DIR / -DVulkan_LIBRARY instead.
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Verify examples built
+        # glslc (from shaderc) is installed, so the example targets MUST exist —
+        # same guard as the linux job; a silent return() from the shader helper
+        # should fail rather than pass green.
+        run: |
+          for b in build/examples/triangle/VulkanWindowTriangle \
+                   build/examples/textured_quad/VulkanWindowTexturedQuad; do
+            test -x "$b" || { echo "::error::expected example binary missing: $b"; exit 1; }
+          done
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-latest
+          path: build/VulkanWindow
+
+  macos-smoke:
+    name: Smoke test (MoltenVK + validation)
+    runs-on: macos-latest
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Vulkan deps (Homebrew)
+        # Adds vulkan-validationlayers on top of the build deps so the Debug
+        # run can make validation errors fatal (as the lavapipe job does), and
+        # coreutils for gtimeout (macOS ships no `timeout`).
+        run: |
+          brew update
+          brew install vulkan-headers vulkan-loader molten-vk shaderc \
+            vulkan-validationlayers coreutils
+
+      - name: Configure
+        # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
+        # validation (see VulkanContext / VulkanRenderer).
+        run: |
+          cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix)"
+
+      - name: Build
+        run: cmake --build build-debug --config Debug
+
+      - name: Run headless under MoltenVK with validation
+        # Renders a fixed number of frames then exits; aborts non-zero on any
+        # validation error or synchronization-validation hazard. MoltenVK is the
+        # only ICD; the validation layer comes from the Homebrew manifest dir.
+        # No xvfb (that's X11) — the macOS runner's window server backs the
+        # GLFW/Metal surface directly. Runs the demo AND both examples.
+        run: |
+          set -euo pipefail
+
+          MVK_ICD="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json"
+          test -f "$MVK_ICD" || { echo "::error::MoltenVK ICD not found at $MVK_ICD"; exit 1; }
+          export VK_ICD_FILENAMES="$MVK_ICD" VK_DRIVER_FILES="$MVK_ICD"
+          echo "MoltenVK ICD: $MVK_ICD"
+
+          # Guard against a false pass where the validation layer is missing and
+          # the app silently runs without it.
+          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
+          ls "$VK_LAYER_PATH" | grep -qi validation \
+            || { echo "::error::validation layer manifest not installed"; exit 1; }
+
+          export VULKANWINDOW_MAX_FRAMES=120
+          export VULKANWINDOW_VALIDATION_ABORT=1
+
+          bins=(
+            ./build-debug/VulkanWindow
+            ./build-debug/examples/triangle/VulkanWindowTriangle
+            ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad
+          )
+          for bin in "${bins[@]}"; do
+            if [ ! -x "$bin" ]; then
+              echo "::error::expected smoke binary missing: $bin (glslc not found at configure?)"
+              exit 1
+            fi
+            echo "=== smoke: $bin ==="
+            # gtimeout (coreutils) guards against a hang; the binary self-exits
+            # at 120 frames. set -o pipefail propagates a validation-abort
+            # non-zero exit through the `| tee` pipeline so it fails the job.
+            gtimeout 180 "$bin" 2>&1 | tee run.log
+            if grep -q "running without validation" run.log; then
+              echo "::error::validation layer was not active for $bin — smoke test is meaningless"
+              exit 1
+            fi
+          done
+          echo "macOS smoke passed: demo + 2 examples, 120 frames each under MoltenVK, validation active, no errors."
+
   release:
     name: Release
     # Only publish a Release when a v* tag is pushed — not on every commit to
     # main. Pull-request builds also skip this job.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: [windows, linux, smoke]
+    needs: [windows, linux, smoke, macos, macos-smoke]
     permissions:
       contents: write
 

@@ -179,7 +179,7 @@ void fillDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &info) {
 VulkanContext::VulkanContext(GLFWwindow *window,
                              bool enableBestPracticesValidation,
                              std::string_view appName)
-    : cacheName(sanitizeCacheName(appName)) {
+    : cacheName(sanitizeCacheName(appName)), applicationName(appName) {
   try {
     createInstance(enableBestPracticesValidation);
     setupDebugMessenger();
@@ -267,9 +267,11 @@ void VulkanContext::createInstance(bool enableBestPracticesValidationArg) {
 
   VkApplicationInfo appInfo{};
   appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-  appInfo.pApplicationName = "Vulkan Window";
+  // Surface the consumer's app name to the driver (applicationName is the
+  // unsanitised constructor argument, stable for this object's lifetime).
+  appInfo.pApplicationName = applicationName.c_str();
   appInfo.applicationVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
-  appInfo.pEngineName = "No Engine";
+  appInfo.pEngineName = "VulkanWindow";
   appInfo.engineVersion = VK_MAKE_API_VERSION(0, 1, 0, 0);
 
   // Request the highest API the loader supports, capped at 1.3. On a Vulkan
@@ -308,9 +310,33 @@ void VulkanContext::createInstance(bool enableBestPracticesValidationArg) {
     }
   }
 
+  // Probe for VK_KHR_portability_enumeration. A modern loader hides physical
+  // devices that only implement the portability subset (notably MoltenVK on
+  // macOS) unless this extension is enabled and the ENUMERATE_PORTABILITY flag
+  // is set below. Not platform-gated: any portability ICD benefits, and the
+  // extension simply won't be present on loaders that don't need it.
+  portabilityEnumerationEnabled = false;
+  {
+    uint32_t extCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
+    std::vector<VkExtensionProperties> instanceExts(extCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extCount,
+                                           instanceExts.data());
+    for (const auto &e : instanceExts) {
+      if (std::string_view(e.extensionName) ==
+          VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) {
+        portabilityEnumerationEnabled = true;
+        break;
+      }
+    }
+  }
+
   VkInstanceCreateInfo createInfo{};
   createInfo.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   createInfo.pApplicationInfo = &appInfo;
+  if (portabilityEnumerationEnabled) {
+    createInfo.flags |= VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+  }
 
   auto extensions = getRequiredExtensions();
   createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
@@ -493,6 +519,12 @@ void VulkanContext::createLogicalDevice() {
   VkPhysicalDeviceVulkan13Features features13{};
   features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
 
+  // VkPhysicalDeviceVulkan12Features may only be chained when the device is
+  // 1.2+; VkPhysicalDeviceVulkan13Features needs 1.3+. Chaining a struct newer
+  // than the device's API version is a spec violation (and warns under
+  // validation), so gate each one. deviceIs13 implies deviceIs12.
+  const bool deviceIs12 = deviceApiVersion >= VK_API_VERSION_1_2 &&
+                          instanceApiVersion >= VK_API_VERSION_1_2;
   const bool deviceIs13 = deviceApiVersion >= VK_API_VERSION_1_3 &&
                           instanceApiVersion >= VK_API_VERSION_1_3;
   if (deviceIs13) {
@@ -501,9 +533,12 @@ void VulkanContext::createLogicalDevice() {
 
   VkPhysicalDeviceFeatures2 features2{};
   features2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
-  features2.pNext = &features12;
+  if (deviceIs12) {
+    features2.pNext = &features12;
+  }
 
-  if (useFeatures2) {
+  // Querying the 1.2/1.3 feature structs is only valid on a matching device.
+  if (useFeatures2 && deviceIs12) {
     VkPhysicalDeviceVulkan12Features supported12{};
     supported12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
     VkPhysicalDeviceVulkan13Features supported13{};
@@ -534,9 +569,31 @@ void VulkanContext::createLogicalDevice() {
   if (useFeatures2) {
     createInfo.pNext = &features2;
   }
+  // Build the enabled device-extension list. The Vulkan spec mandates that if a
+  // physical device exposes VK_KHR_portability_subset it MUST be enabled — this
+  // is how portability implementations (e.g. MoltenVK) advertise themselves.
+  // The name is a beta-gated macro (VK_ENABLE_BETA_EXTENSIONS), so use the
+  // string literal to avoid pulling in the provisional headers.
+  std::vector<const char *> enabledDeviceExtensions(deviceExtensions.begin(),
+                                                    deviceExtensions.end());
+  {
+    uint32_t extCount = 0;
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount,
+                                         nullptr);
+    std::vector<VkExtensionProperties> available(extCount);
+    vkEnumerateDeviceExtensionProperties(physicalDevice, nullptr, &extCount,
+                                         available.data());
+    for (const auto &e : available) {
+      if (std::string_view(e.extensionName) == "VK_KHR_portability_subset") {
+        enabledDeviceExtensions.push_back("VK_KHR_portability_subset");
+        break;
+      }
+    }
+  }
+
   createInfo.enabledExtensionCount =
-      static_cast<uint32_t>(deviceExtensions.size());
-  createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+      static_cast<uint32_t>(enabledDeviceExtensions.size());
+  createInfo.ppEnabledExtensionNames = enabledDeviceExtensions.data();
 
   // Device layers have been deprecated since Vulkan 1.0 — the loader ignores
   // them and only instance layers (set in createInstance) take effect. Setting
@@ -784,6 +841,12 @@ auto VulkanContext::getRequiredExtensions() const
   if (needKHRFeatures2Loader) {
     extensions.push_back(
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+  }
+
+  // Required alongside the ENUMERATE_PORTABILITY instance flag so portability
+  // ICDs (e.g. MoltenVK) are enumerated. Probed in createInstance.
+  if (portabilityEnumerationEnabled) {
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
   }
 
   return extensions;
