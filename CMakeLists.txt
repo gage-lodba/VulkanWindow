@@ -31,6 +31,12 @@ option(VULKANWINDOW_BUILD_EXAMPLES
 option(VULKANWINDOW_BEST_PRACTICES
   "Enable Vulkan best-practices validation in Debug builds"
   OFF)
+# Off by default (even top-level) because the test target fetches doctest via
+# FetchContent — we don't want to force a network dependency on an ordinary
+# build. CI turns it on explicitly. Always off for consumers.
+option(VULKANWINDOW_BUILD_TESTS
+  "Build the unit tests (fetches doctest via FetchContent). Requires CMake >= 3.14."
+  OFF)
 # When ON, install rules are emitted AND glfw3 / VulkanMemoryAllocator are
 # resolved via find_package instead of the vendored submodules. Off by
 # default because the bundled-submodule build is the dev-friendly default;
@@ -129,6 +135,8 @@ set(lib_sources
   source/VulkanRenderer.h
   source/VulkanResources.cpp
   source/VulkanResources.h
+  source/VulkanSelectors.cpp
+  source/VulkanSelectors.h
   source/VulkanUtils.cpp
   source/VulkanUtils.h
   source/Window.cpp
@@ -199,6 +207,13 @@ endif()
 if(VULKANWINDOW_BUILD_EXAMPLES)
   add_subdirectory(examples/triangle)
   add_subdirectory(examples/textured_quad)
+endif()
+
+# Unit tests (off by default; see VULKANWINDOW_BUILD_TESTS above). enable_testing
+# must be called in this top-level scope for `ctest` to discover the tests.
+if(VULKANWINDOW_BUILD_TESTS)
+  enable_testing()
+  add_subdirectory(tests)
 endif()
 
 # ---- Install / export -------------------------------------------------------

@@ -101,12 +101,20 @@ jobs:
       - name: Configure
         # Emit compile_commands.json for clang-tidy; route the compilers through
         # ccache so unchanged deps (GLFW/ImGui/VMA) aren't recompiled each run.
+        # Tests are built here (this is the only job that runs them) — doctest is
+        # fetched via FetchContent.
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DVULKANWINDOW_BUILD_TESTS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Run unit tests
+        # Pure-logic tests (selectors, colour/format helpers) — no GPU, ICD, or
+        # display needed, so they run on the plain runner.
+        run: ctest --test-dir build --output-on-failure
 
       - name: Verify examples built
         # glslc is installed, so the example targets MUST exist. If they don't,

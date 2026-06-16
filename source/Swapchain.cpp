@@ -2,15 +2,14 @@
 
 #include <vk_mem_alloc.h>
 
-#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iostream>
-#include <limits>
 #include <stdexcept>
 
 #include "VulkanContext.h"
 #include "VulkanRenderer.h"  // PresentMode
+#include "VulkanSelectors.h"
 #include "VulkanUtils.h"
 
 using vkutil::querySwapChainSupport;
@@ -19,85 +18,16 @@ using vkutil::vkCheck;
 
 namespace {
 
-auto chooseSwapSurfaceFormat(
-    const std::vector<VkSurfaceFormatKHR> &availableFormats,
-    SurfaceFormatPreference preference) -> VkSurfaceFormatKHR {
-  // Prefer 32-bit BGRA then RGBA in the requested encoding, all in the standard
-  // sRGB-nonlinear display colour space. UNORM is the default so ImGui's
-  // (non-gamma-corrected) colours present verbatim; SRGB is the opt-in for apps
-  // doing their own linear-space rendering.
-  const std::array<VkFormat, 2> preferred =
-      preference == SurfaceFormatPreference::Srgb
-          ? std::array{VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB}
-          : std::array{VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM};
-
-  for (VkFormat want : preferred) {
-    for (const auto &availableFormat : availableFormats) {
-      if (availableFormat.format == want &&
-          availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) {
-        return availableFormat;
-      }
-    }
-  }
-  return availableFormats[0];
-}
-
-auto chooseSwapPresentMode(
-    const std::vector<VkPresentModeKHR> &availablePresentModes,
-    PresentMode preferred) -> VkPresentModeKHR {
-  const auto contains = [&](VkPresentModeKHR mode) -> bool {
-    return std::ranges::find(availablePresentModes, mode) !=
-           availablePresentModes.end();
-  };
-
-  // FIFO is required by the Vulkan spec to be supported on every swap-chain,
-  // but defensively confirm it's in the surface's list. A non-conforming
-  // driver would otherwise fail later in vkCreateSwapchainKHR with a less
-  // actionable error.
-  if (preferred == PresentMode::Vsync) {
-    if (contains(VK_PRESENT_MODE_FIFO_KHR)) return VK_PRESENT_MODE_FIFO_KHR;
-    if (!availablePresentModes.empty()) return availablePresentModes[0];
-    return VK_PRESENT_MODE_FIFO_KHR;  // last resort; createSwapchain will fail
-  }
-
-  const VkPresentModeKHR target = preferred == PresentMode::Mailbox
-                                      ? VK_PRESENT_MODE_MAILBOX_KHR
-                                      : VK_PRESENT_MODE_IMMEDIATE_KHR;
-  if (contains(target)) return target;
-  // Warn once per process — chooseSwapPresentMode is called on every
-  // swap-chain (re)create, so spamming on each resize would be noise.
-  static bool warned = false;
-  if (!warned) {
-    std::cerr << "Warning: preferred present mode "
-              << (preferred == PresentMode::Mailbox ? "Mailbox" : "Immediate")
-              << " unavailable; falling back to VK_PRESENT_MODE_FIFO_KHR.\n";
-    warned = true;
-  }
-  return VK_PRESENT_MODE_FIFO_KHR;
-}
-
+// Thin GLFW-aware wrapper over vkutil::clampSwapExtent: fetch the current
+// framebuffer size, then delegate the pure clamp/passthrough logic (which is
+// unit-tested in isolation).
 auto chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
                       GLFWwindow *window) -> VkExtent2D {
-  if (capabilities.currentExtent.width !=
-      std::numeric_limits<uint32_t>::max()) {
-    return capabilities.currentExtent;
-  }
-
   int width = 0;
   int height = 0;
   glfwGetFramebufferSize(window, &width, &height);
-
-  VkExtent2D actualExtent = {.width = static_cast<uint32_t>(width),
-                             .height = static_cast<uint32_t>(height)};
-
-  actualExtent.width =
-      std::clamp(actualExtent.width, capabilities.minImageExtent.width,
-                 capabilities.maxImageExtent.width);
-  actualExtent.height =
-      std::clamp(actualExtent.height, capabilities.minImageExtent.height,
-                 capabilities.maxImageExtent.height);
-
-  return actualExtent;
+  return vkutil::clampSwapExtent(capabilities, static_cast<uint32_t>(width),
+                                 static_cast<uint32_t>(height));
 }
 
 }  // namespace
@@ -163,10 +93,24 @@ void Swapchain::createSwapchain(PresentMode preferred) {
       querySwapChainSupport(ctx.physicalDevice, ctx.surface);
 
   VkSurfaceFormatKHR surfaceFormat =
-      chooseSwapSurfaceFormat(support.formats, formatPreference);
+      vkutil::chooseSwapSurfaceFormat(support.formats, formatPreference);
   VkPresentModeKHR presentMode =
-      chooseSwapPresentMode(support.presentModes, preferred);
+      vkutil::chooseSwapPresentMode(support.presentModes, preferred);
   VkExtent2D chosenExtent = chooseSwapExtent(support.capabilities, window);
+
+  // chooseSwapPresentMode is pure (no logging); report a fallback here. Warn
+  // once per process — createSwapchain runs on every resize, so warning each
+  // time would be noise.
+  if (preferred != PresentMode::Vsync &&
+      presentMode == VK_PRESENT_MODE_FIFO_KHR) {
+    static bool warned = false;
+    if (!warned) {
+      std::cerr << "Warning: preferred present mode "
+                << (preferred == PresentMode::Mailbox ? "Mailbox" : "Immediate")
+                << " unavailable; falling back to VK_PRESENT_MODE_FIFO_KHR.\n";
+      warned = true;
+    }
+  }
 
   // Mailbox benefits from triple buffering (one acquired, one queued, one
   // displayed); request an extra image so the driver doesn't have to discard

@@ -68,6 +68,7 @@ cmake --build build --config Release
 | `VULKANWINDOW_BUILD_DEMO` | `ON` if top-level, else `OFF` | Build the `VulkanWindowDemo` executable. |
 | `VULKANWINDOW_BUILD_EXAMPLES` | `ON` if top-level, else `OFF` | Build the example executables under `examples/`. Needs `glslc` (Vulkan SDK); skipped with a message if absent. |
 | `VULKANWINDOW_BEST_PRACTICES` | `OFF` | In Debug builds, enable `VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT`. |
+| `VULKANWINDOW_BUILD_TESTS` | `OFF` | Build the unit tests (`tests/`). Fetches doctest via `FetchContent`; needs CMake ≥ 3.14 and network access at configure. Run with `ctest --test-dir build`. |
 
 ## Examples
 
@@ -361,9 +362,15 @@ Application
 GitHub Actions builds Release configurations on `windows-latest`,
 `ubuntu-latest`, and `macos-latest` (the macOS build runs against MoltenVK and
 is what compiles the `VK_KHR_portability_*` paths) and runs `clang-tidy` (with
-`-warnings-as-errors='*'`) on Linux. Binaries are uploaded as workflow
-artifacts on every push; a GitHub Release is published only when a `v*` tag is
-pushed.
+`-warnings-as-errors='*'`) and the **unit tests** (`ctest`) on Linux. Binaries
+are uploaded as workflow artifacts on every push; a GitHub Release is published
+only when a `v*` tag is pushed.
+
+The unit tests (`tests/`, [doctest](https://github.com/doctest/doctest)) cover
+the library's pure logic — surface-format / present-mode / extent selection,
+cache-name sanitization, and the colour-format helpers — none of which need a
+GPU, so they run on the plain runner. They complement the smoke tests, which
+exercise the runtime GPU path.
 
 Two **smoke-test** jobs build a Debug configuration (validation layers and
 synchronization validation compiled in) and run the demo plus both examples

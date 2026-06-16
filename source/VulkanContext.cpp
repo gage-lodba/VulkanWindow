@@ -23,36 +23,13 @@
 #include <unistd.h>
 #endif
 
+#include "VulkanSelectors.h"
 #include "VulkanUtils.h"
 
 using vkutil::querySwapChainSupport;
 using vkutil::vkCheck;
 
 namespace {
-
-// Reduce an app name to a filesystem-safe directory component. Keeps
-// alphanumerics plus a small safe set, maps everything else to '_', and never
-// yields an empty or dot-only name (which would create a bogus cache path).
-auto sanitizeCacheName(std::string_view name) -> std::string {
-  std::string out;
-  out.reserve(name.size());
-  for (char ch : name) {
-    const bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
-                    (ch >= '0' && ch <= '9') || ch == '-' || ch == '_' ||
-                    ch == '.' || ch == ' ';
-    out.push_back(ok ? ch : '_');
-  }
-  // Windows strips trailing dots/spaces from path components, so a name like
-  // "App." or "v1.0 " wouldn't round-trip. Drop them; this also collapses "."
-  // and ".." to empty, which falls back below.
-  while (!out.empty() && (out.back() == ' ' || out.back() == '.')) {
-    out.pop_back();
-  }
-  if (out.empty()) {
-    return "VulkanWindow";
-  }
-  return out;
-}
 
 // Per-user cache directory for the pipeline cache file, namespaced by app name
 // so apps built on this library don't collide on one shared file. Falls back to
@@ -179,7 +156,7 @@ void fillDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &info) {
 VulkanContext::VulkanContext(GLFWwindow *window,
                              bool enableBestPracticesValidation,
                              std::string_view appName)
-    : cacheName(sanitizeCacheName(appName)), applicationName(appName) {
+    : cacheName(vkutil::sanitizeCacheName(appName)), applicationName(appName) {
   try {
     createInstance(enableBestPracticesValidation);
     setupDebugMessenger();
