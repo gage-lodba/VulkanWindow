@@ -9,5 +9,7 @@ class UserInterface {
   void render();
 
  private:
+  void renderDockSpace();
   void renderMainWindow();
+  void renderInfoWindow();
 };

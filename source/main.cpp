@@ -3,17 +3,17 @@
 #include "Application.h"
 #include "UserInterface.h"
 
-int main() {
+auto main() -> int {
   try {
     Application app;
 
     // Set up the default demo UI
     UserInterface ui;
-    app.setUICallback([&ui]() { ui.render(); });
+    app.setUICallback([&ui]() -> void { ui.render(); });
 
     app.run();
   } catch (const std::exception &e) {
-    std::cerr << "Fatal error: " << e.what() << std::endl;
+    std::cerr << "Fatal error: " << e.what() << '\n';
     return 1;
   }
 

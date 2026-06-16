@@ -1,0 +1,26 @@
+@PACKAGE_INIT@
+
+# VulkanWindow's transitive dependencies. The consumer must have these
+# findable on CMAKE_PREFIX_PATH (system install, vcpkg, Conan, etc.) — we
+# don't ship them, since they're third-party libraries with their own
+# versioning.
+include(CMakeFindDependencyMacro)
+find_dependency(Vulkan)
+
+# glfw3 and VulkanMemoryAllocator are only required when the consumer's
+# build doesn't already supply them. If the consumer vendored their own
+# copies as submodules (creating the `glfw` and `GPUOpen::VulkanMemoryAllocator`
+# targets before find_package(VulkanWindow)), skip the system lookup.
+if(NOT TARGET glfw)
+  find_dependency(glfw3)
+endif()
+if(NOT TARGET GPUOpen::VulkanMemoryAllocator)
+  find_dependency(VulkanMemoryAllocator)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/VulkanWindowTargets.cmake")
+
+# vulkanwindow_add_shaders() helper (compile GLSL -> embeddable SPIR-V).
+include("${CMAKE_CURRENT_LIST_DIR}/VulkanWindowShaders.cmake")
+
+check_required_components(VulkanWindow)
