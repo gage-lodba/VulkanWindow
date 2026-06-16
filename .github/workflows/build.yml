@@ -307,16 +307,36 @@ jobs:
         run: |
           set -euo pipefail
 
-          MVK_ICD="$(brew --prefix molten-vk)/share/vulkan/icd.d/MoltenVK_icd.json"
-          test -f "$MVK_ICD" || { echo "::error::MoltenVK ICD not found at $MVK_ICD"; exit 1; }
+          PREFIX="$(brew --prefix)"
+
+          # Locate the MoltenVK ICD manifest. Homebrew's molten-vk layout has
+          # moved between formula versions, so search the prefix instead of
+          # hardcoding a path. If the formula ships no manifest, synthesize one
+          # pointing at libMoltenVK.dylib — the loader only needs the JSON to
+          # find the dylib.
+          MVK_ICD="$(find "$PREFIX" -name 'MoltenVK_icd.json' 2>/dev/null | head -n1 || true)"
+          if [ -z "$MVK_ICD" ]; then
+            MVK_LIB="$(find "$PREFIX" -name 'libMoltenVK.dylib' 2>/dev/null | head -n1 || true)"
+            test -n "$MVK_LIB" || { echo "::error::no MoltenVK ICD manifest or libMoltenVK.dylib under $PREFIX"; exit 1; }
+            MVK_ICD="$PWD/MoltenVK_icd.json"
+            cat > "$MVK_ICD" <<EOF
+          {
+            "file_format_version": "1.0.0",
+            "ICD": { "library_path": "$MVK_LIB", "api_version": "1.2.0" }
+          }
+          EOF
+            echo "Synthesized MoltenVK ICD manifest -> $MVK_LIB"
+          fi
           export VK_ICD_FILENAMES="$MVK_ICD" VK_DRIVER_FILES="$MVK_ICD"
           echo "MoltenVK ICD: $MVK_ICD"
 
-          # Guard against a false pass where the validation layer is missing and
-          # the app silently runs without it.
-          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
-          ls "$VK_LAYER_PATH" | grep -qi validation \
-            || { echo "::error::validation layer manifest not installed"; exit 1; }
+          # Locate the validation layer manifest the same way (guards against a
+          # false pass where the layer is missing and the app silently runs
+          # without it). Its dir is what the loader scans via VK_LAYER_PATH.
+          VK_LAYER_JSON="$(find "$PREFIX" -name 'VkLayer_khronos_validation.json' 2>/dev/null | head -n1 || true)"
+          test -n "$VK_LAYER_JSON" || { echo "::error::validation layer manifest not found under $PREFIX"; exit 1; }
+          export VK_LAYER_PATH="$(dirname "$VK_LAYER_JSON")"
+          echo "Validation layer manifest dir: $VK_LAYER_PATH"
 
           export VULKANWINDOW_MAX_FRAMES=120
           export VULKANWINDOW_VALIDATION_ABORT=1
