@@ -12,8 +12,7 @@ class Window {
   using CursorPosCallback = std::function<void(double xpos, double ypos)>;
   using MouseButtonCallback =
       std::function<void(int button, int action, int mods)>;
-  using ScrollCallback =
-      std::function<void(double xoffset, double yoffset)>;
+  using ScrollCallback = std::function<void(double xoffset, double yoffset)>;
   using CharCallback = std::function<void(unsigned int codepoint)>;
 
   Window(int width, int height, std::string_view title, bool resizable = true);

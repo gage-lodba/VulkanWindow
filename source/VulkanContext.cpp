@@ -236,8 +236,9 @@ void VulkanContext::createInstance(bool enableBestPracticesValidationArg) {
       std::cerr
           << "Warning: VK_EXT_validation_features not exposed by the installed "
              "validation layer; synchronization validation"
-          << (enableBestPracticesValidationArg ? " and best-practices validation"
-                                               : "")
+          << (enableBestPracticesValidationArg
+                  ? " and best-practices validation"
+                  : "")
           << " will not be enabled.\n";
     }
   }
@@ -796,8 +797,7 @@ auto VulkanContext::checkDeviceExtensionSupport(
   return requiredExtensions.empty();
 }
 
-auto VulkanContext::getRequiredExtensions() const
-    -> std::vector<const char *> {
+auto VulkanContext::getRequiredExtensions() const -> std::vector<const char *> {
   uint32_t glfwExtensionCount = 0;
   const char **glfwExtensions =
       glfwGetRequiredInstanceExtensions(&glfwExtensionCount);

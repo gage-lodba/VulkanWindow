@@ -108,8 +108,7 @@ void Application::setScrollCallback(
   window->setScrollCallback(std::move(callback));
 }
 
-void Application::setCharCallback(
-    std::function<void(unsigned int)> callback) {
+void Application::setCharCallback(std::function<void(unsigned int)> callback) {
   window->setCharCallback(std::move(callback));
 }
 

@@ -22,10 +22,11 @@ class Application {
   /// (Unorm) presents ImGui colours verbatim — correct for UI-centric apps;
   /// pass Srgb for linear-space 3D rendering (see SurfaceFormatPreference).
   /// `title` also names the per-app pipeline-cache directory.
-  explicit Application(
-      int width, int height, bool resizable = true,
-      std::string_view title = "Vulkan Window", uint32_t framesInFlight = 2,
-      SurfaceFormatPreference formatPreference = SurfaceFormatPreference::Unorm);
+  explicit Application(int width, int height, bool resizable = true,
+                       std::string_view title = "Vulkan Window",
+                       uint32_t framesInFlight = 2,
+                       SurfaceFormatPreference formatPreference =
+                           SurfaceFormatPreference::Unorm);
 
   ~Application();
 

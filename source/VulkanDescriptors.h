@@ -23,8 +23,8 @@ struct DescriptorBinding {
 ///          VK_SHADER_STAGE_FRAGMENT_BIT},
 ///     });
 [[nodiscard]] auto createDescriptorSetLayout(
-    VkDevice device, std::initializer_list<DescriptorBinding> bindings)
-    -> VkDescriptorSetLayout;
+    VkDevice device,
+    std::initializer_list<DescriptorBinding> bindings) -> VkDescriptorSetLayout;
 
 /// Create a descriptor pool sized for `maxSets` sets covering the given pool
 /// sizes (created with FREE_DESCRIPTOR_SET_BIT). Throws on failure; destroy
@@ -35,8 +35,7 @@ struct DescriptorBinding {
 
 /// Allocate a single descriptor set with `layout` from `pool`. Throws on
 /// failure.
-[[nodiscard]] auto allocateDescriptorSet(VkDevice device,
-                                         VkDescriptorPool pool,
+[[nodiscard]] auto allocateDescriptorSet(VkDevice device, VkDescriptorPool pool,
                                          VkDescriptorSetLayout layout)
     -> VkDescriptorSet;
 

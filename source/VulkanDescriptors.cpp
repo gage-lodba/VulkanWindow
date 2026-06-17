@@ -6,9 +6,9 @@
 
 namespace vkutil {
 
-auto createDescriptorSetLayout(
-    VkDevice device, std::initializer_list<DescriptorBinding> bindings)
-    -> VkDescriptorSetLayout {
+auto createDescriptorSetLayout(VkDevice device,
+                               std::initializer_list<DescriptorBinding>
+                                   bindings) -> VkDescriptorSetLayout {
   std::vector<VkDescriptorSetLayoutBinding> layoutBindings;
   layoutBindings.reserve(bindings.size());
   for (const DescriptorBinding &binding : bindings) {

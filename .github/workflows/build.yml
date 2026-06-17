@@ -91,7 +91,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc \
             xorg-dev libxkbcommon-dev \
-            libwayland-dev libwayland-bin wayland-protocols clang-tidy
+            libwayland-dev libwayland-bin wayland-protocols clang-tidy clang-format-18
+
+      - name: Check formatting
+        # clang-format is pinned to one major version on purpose: its output
+        # drifts between releases, so an unpinned `clang-format` would fail CI on
+        # untouched code the day the runner image bumps. .clang-format is a
+        # BasedOnStyle config (not a version-locked --dump-config), so it parses
+        # under newer local clang-format too. --Werror turns any diff into a
+        # non-zero exit. Covers the same trees the reformat baseline did.
+        run: |
+          clang-format-18 --version
+          clang-format-18 --dry-run --Werror \
+            source/*.cpp source/*.h \
+            examples/*/*.cpp \
+            tests/*.cpp
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1

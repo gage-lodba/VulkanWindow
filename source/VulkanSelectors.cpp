@@ -75,7 +75,8 @@ auto chooseSwapPresentMode(const std::vector<VkPresentModeKHR> &available,
 }
 
 auto clampSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
-                     uint32_t windowWidth, uint32_t windowHeight) -> VkExtent2D {
+                     uint32_t windowWidth,
+                     uint32_t windowHeight) -> VkExtent2D {
   if (capabilities.currentExtent.width !=
       std::numeric_limits<uint32_t>::max()) {
     return capabilities.currentExtent;

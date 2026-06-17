@@ -1,11 +1,13 @@
 // Capstone example: a textured quad that exercises the whole helper surface —
 // a vertex buffer (createDeviceLocalBuffer), a mipmapped texture + sampler
-// (createTexture2D / createSampler), a descriptor set (createDescriptorSetLayout
-// / createDescriptorPool / allocateDescriptorSet / updateImageSamplerDescriptor),
-// GLSL compiled+embedded by vulkanwindow_add_shaders, and a pipeline built
-// against the handles from Application::getContext() / getSwapchain(). ImGui
-// composites on top; the pipeline rebuilds only on a surface-format change.
+// (createTexture2D / createSampler), a descriptor set
+// (createDescriptorSetLayout / createDescriptorPool / allocateDescriptorSet /
+// updateImageSamplerDescriptor), GLSL compiled+embedded by
+// vulkanwindow_add_shaders, and a pipeline built against the handles from
+// Application::getContext() / getSwapchain(). ImGui composites on top; the
+// pipeline rebuilds only on a surface-format change.
 
+#include <imgui.h>
 #include <vulkan/vulkan.h>
 
 #include <array>
@@ -14,8 +16,6 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
-
-#include <imgui.h>
 
 #include "Application.h"
 #include "Swapchain.h"
@@ -66,8 +66,8 @@ auto makeCheckerboard(uint32_t size) -> std::vector<uint8_t> {
   return pixels;
 }
 
-auto createShaderModule(VkDevice device, const uint32_t *code, size_t sizeBytes)
-    -> VkShaderModule {
+auto createShaderModule(VkDevice device, const uint32_t *code,
+                        size_t sizeBytes) -> VkShaderModule {
   VkShaderModuleCreateInfo info{};
   info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
   info.codeSize = sizeBytes;
@@ -116,8 +116,8 @@ class TexturedQuadExample {
         device, {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}}, 1);
     descriptorSet = vkutil::allocateDescriptorSet(device, descriptorPool,
                                                   descriptorSetLayout);
-    vkutil::updateImageSamplerDescriptor(device, descriptorSet, 0,
-                                         texture.view, sampler);
+    vkutil::updateImageSamplerDescriptor(device, descriptorSet, 0, texture.view,
+                                         sampler);
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -130,9 +130,10 @@ class TexturedQuadExample {
 
     buildPipeline();
 
-    app.setRenderCallback([this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
-      record(cmd, extent);
-    });
+    app.setRenderCallback(
+        [this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
+          record(cmd, extent);
+        });
 
     // Only a surface-format change makes the pipeline incompatible (new render
     // pass); dynamic viewport+scissor handles plain resizes. Device is idle in
@@ -295,8 +296,8 @@ class TexturedQuadExample {
 
   void record(VkCommandBuffer cmd, VkExtent2D extent) const {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout,
-                            0, 1, &descriptorSet, 0, nullptr);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &vertexBuffer.buffer, &offset);

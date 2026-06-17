@@ -190,9 +190,8 @@ void Swapchain::createImageViews() {
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
 
-    vkCheck(
-        vkCreateImageView(ctx.device, &createInfo, nullptr, &imageViews[i]),
-        "Failed to create swap-chain image view");
+    vkCheck(vkCreateImageView(ctx.device, &createInfo, nullptr, &imageViews[i]),
+            "Failed to create swap-chain image view");
   }
 }
 
@@ -277,9 +276,8 @@ void Swapchain::createRenderPass() {
   renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
   renderPassInfo.pDependencies = dependencies.data();
 
-  vkCheck(
-      vkCreateRenderPass(ctx.device, &renderPassInfo, nullptr, &renderPass),
-      "Failed to create render pass");
+  vkCheck(vkCreateRenderPass(ctx.device, &renderPassInfo, nullptr, &renderPass),
+          "Failed to create render pass");
 }
 
 void Swapchain::createFramebuffers() {
@@ -356,10 +354,9 @@ void Swapchain::createFramebuffers() {
   }
 }
 
-auto Swapchain::findSupportedFormat(const std::vector<VkFormat> &candidates,
-                                    VkImageTiling tiling,
-                                    VkFormatFeatureFlags features) const
-    -> VkFormat {
+auto Swapchain::findSupportedFormat(
+    const std::vector<VkFormat> &candidates, VkImageTiling tiling,
+    VkFormatFeatureFlags features) const -> VkFormat {
   for (VkFormat format : candidates) {
     VkFormatProperties props;
     vkGetPhysicalDeviceFormatProperties(ctx.physicalDevice, format, &props);

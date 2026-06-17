@@ -18,7 +18,8 @@ TEST_CASE("srgbToLinear uses the linear segment below the 0.04045 threshold") {
 
 TEST_CASE("srgbToLinear uses the power segment above the threshold") {
   // A mid-grey 0.5 sRGB is ~0.214 linear (the canonical reference value).
-  CHECK(vkutil::srgbToLinear(0.5f) == doctest::Approx(0.21404114f).epsilon(1e-5));
+  CHECK(vkutil::srgbToLinear(0.5f) ==
+        doctest::Approx(0.21404114f).epsilon(1e-5));
   const float expected = std::pow((0.8f + 0.055f) / 1.055f, 2.4f);
   CHECK(vkutil::srgbToLinear(0.8f) == doctest::Approx(expected));
 }

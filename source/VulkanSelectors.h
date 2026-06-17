@@ -33,15 +33,15 @@ namespace vkutil {
 /// available. Pure: emits no warning — the caller can compare the result to
 /// detect (and report) a fallback.
 [[nodiscard]] auto chooseSwapPresentMode(
-    const std::vector<VkPresentModeKHR> &available, PresentMode preferred)
-    -> VkPresentModeKHR;
+    const std::vector<VkPresentModeKHR> &available,
+    PresentMode preferred) -> VkPresentModeKHR;
 
 /// Resolve the swap-chain extent. Returns `capabilities.currentExtent` when the
 /// surface dictates it (width != UINT32_MAX); otherwise clamps the supplied
 /// framebuffer size to the surface's min/max image extent. The window size is
 /// passed in (rather than queried) so this stays free of GLFW.
 [[nodiscard]] auto clampSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
-                                   uint32_t windowWidth, uint32_t windowHeight)
-    -> VkExtent2D;
+                                   uint32_t windowWidth,
+                                   uint32_t windowHeight) -> VkExtent2D;
 
 }  // namespace vkutil

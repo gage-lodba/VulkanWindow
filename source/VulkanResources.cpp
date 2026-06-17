@@ -13,8 +13,8 @@ namespace vkutil {
 namespace {
 
 auto makeBuffer(VmaAllocator allocator, VkDeviceSize size,
-                VkBufferUsageFlags usage, VmaAllocationCreateFlags allocFlags)
-    -> Buffer {
+                VkBufferUsageFlags usage,
+                VmaAllocationCreateFlags allocFlags) -> Buffer {
   VkBufferCreateInfo bufferInfo{};
   bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
   bufferInfo.size = size;
@@ -54,8 +54,8 @@ void destroyBuffer(VmaAllocator allocator, Buffer &buffer) {
   buffer.mapped = nullptr;
 }
 
-auto beginSingleTimeCommands(VkDevice device, VkCommandPool commandPool)
-    -> VkCommandBuffer {
+auto beginSingleTimeCommands(VkDevice device,
+                             VkCommandPool commandPool) -> VkCommandBuffer {
   VkCommandBufferAllocateInfo allocInfo{};
   allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
   allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -107,8 +107,8 @@ auto createDeviceLocalBuffer(VmaAllocator allocator, VkDevice device,
   // memory. The subsequent queue submit makes the flushed host writes visible.
   vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
 
-  Buffer result = makeBuffer(
-      allocator, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
+  Buffer result =
+      makeBuffer(allocator, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
 
   VkCommandPoolCreateInfo poolInfo{};
   poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -192,7 +192,8 @@ void transitionImageLayout(VkCommandBuffer commandBuffer, VkImage image,
   } else {
     // Conservative fallback for any other pair.
     barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
-    barrier.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
+    barrier.dstAccessMask =
+        VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
     srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
     dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
   }
@@ -247,8 +248,8 @@ auto computeMipLevels(uint32_t width, uint32_t height) -> uint32_t {
 }
 
 auto makeImage(VmaAllocator allocator, uint32_t width, uint32_t height,
-               uint32_t mipLevels, VkFormat format, VkImageUsageFlags usage)
-    -> Image {
+               uint32_t mipLevels, VkFormat format,
+               VkImageUsageFlags usage) -> Image {
   VkImageCreateInfo imageInfo{};
   imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
   imageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -269,8 +270,8 @@ auto makeImage(VmaAllocator allocator, uint32_t width, uint32_t height,
   result.extent = {.width = width, .height = height};
   result.format = format;
   result.mipLevels = mipLevels;
-  vkCheck(vmaCreateImage(allocator, &imageInfo, &allocCreateInfo,
-                         &result.image, &result.allocation, nullptr),
+  vkCheck(vmaCreateImage(allocator, &imageInfo, &allocCreateInfo, &result.image,
+                         &result.allocation, nullptr),
           "Failed to create image");
   return result;
 }
@@ -327,8 +328,8 @@ void recordMipChain(VkCommandBuffer cmd, VkImage image, uint32_t width,
     barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
     barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
     vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT,
-                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
-                         nullptr, 1, &barrier);
+                         VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr,
+                         0, nullptr, 1, &barrier);
 
     if (mipWidth > 1) mipWidth /= 2;
     if (mipHeight > 1) mipHeight /= 2;
@@ -350,8 +351,8 @@ void recordMipChain(VkCommandBuffer cmd, VkImage image, uint32_t width,
 auto createTexture2D(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
                      VkDevice device, VkQueue queue, uint32_t queueFamily,
                      const void *data, VkDeviceSize dataSize, uint32_t width,
-                     uint32_t height, VkFormat format, bool generateMipmaps)
-    -> Image {
+                     uint32_t height, VkFormat format,
+                     bool generateMipmaps) -> Image {
   const uint32_t mipLevels =
       generateMipmaps ? computeMipLevels(width, height) : 1U;
 
@@ -410,9 +411,9 @@ auto createTexture2D(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
     if (mipLevels > 1) {
       recordMipChain(cmd, result.image, width, height, mipLevels);
     } else {
-      transitionImageLayout(cmd, result.image,
-                            VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                            VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
+      transitionImageLayout(
+          cmd, result.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, mipLevels);
     }
 
     endSingleTimeCommands(device, pool, queue, cmd);

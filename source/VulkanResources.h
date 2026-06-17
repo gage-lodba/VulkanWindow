@@ -53,9 +53,8 @@ void destroyBuffer(VmaAllocator allocator, Buffer &buffer);
 
 /// Allocate and begin a primary command buffer for a one-shot submission
 /// (ONE_TIME_SUBMIT). Pair with endSingleTimeCommands. Throws on failure.
-[[nodiscard]] auto beginSingleTimeCommands(VkDevice device,
-                                           VkCommandPool commandPool)
-    -> VkCommandBuffer;
+[[nodiscard]] auto beginSingleTimeCommands(
+    VkDevice device, VkCommandPool commandPool) -> VkCommandBuffer;
 
 /// End, submit, and wait for a command buffer from beginSingleTimeCommands,
 /// then free it. Blocks on vkQueueWaitIdle. Throws on failure.

@@ -361,8 +361,9 @@ Application
 
 GitHub Actions builds Release configurations on `windows-latest`,
 `ubuntu-latest`, and `macos-latest` (the macOS build runs against MoltenVK and
-is what compiles the `VK_KHR_portability_*` paths) and runs `clang-tidy` (with
-`-warnings-as-errors='*'`) and the **unit tests** (`ctest`) on Linux. Binaries
+is what compiles the `VK_KHR_portability_*` paths) and runs `clang-format`
+(pinned to `clang-format-18`, `--Werror`), `clang-tidy` (with
+`-warnings-as-errors='*'`), and the **unit tests** (`ctest`) on Linux. Binaries
 are uploaded as workflow artifacts on every push; a GitHub Release is published
 only when a `v*` tag is pushed.
 

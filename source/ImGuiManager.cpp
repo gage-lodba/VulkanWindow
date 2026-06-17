@@ -15,17 +15,13 @@
 static_assert(IMGUI_VERSION_NUM >= 19220,
               "Dear ImGui >= 1.92.2 is required (PipelineInfoMain).");
 
-ImGuiManager::ImGuiManager(GLFWwindow *window, uint32_t apiVersion,
-                           VkInstance instance,
-                           VkPhysicalDevice physicalDevice, VkDevice device,
-                           uint32_t queueFamily, VkQueue queue,
-                           VkRenderPass renderPass,
-                           VkPipelineCache pipelineCache,
-                           uint32_t minImageCount, uint32_t imageCount,
-                           uint32_t textureSlots,
-                           std::function<void()> styleCallback,
-                           bool linearizeStyleColors,
-                           std::function<void()> fontCallback)
+ImGuiManager::ImGuiManager(
+    GLFWwindow *window, uint32_t apiVersion, VkInstance instance,
+    VkPhysicalDevice physicalDevice, VkDevice device, uint32_t queueFamily,
+    VkQueue queue, VkRenderPass renderPass, VkPipelineCache pipelineCache,
+    uint32_t minImageCount, uint32_t imageCount, uint32_t textureSlots,
+    std::function<void()> styleCallback, bool linearizeStyleColors,
+    std::function<void()> fontCallback)
     : styleCallback(std::move(styleCallback)),
       fontCallback(std::move(fontCallback)),
       linearizeStyleColors(linearizeStyleColors) {
@@ -82,9 +78,10 @@ ImGuiManager::ImGuiManager(GLFWwindow *window, uint32_t apiVersion,
     // `textureSlots` user textures + 1 for the font atlas, floored at the
     // backend's documented minimum so a small slot count can't trip its assert.
     initInfo.DescriptorPool = VK_NULL_HANDLE;
-    initInfo.DescriptorPoolSize = std::max(
-        textureSlots + 1,
-        static_cast<uint32_t>(IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE));
+    initInfo.DescriptorPoolSize =
+        std::max(textureSlots + 1,
+                 static_cast<uint32_t>(
+                     IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE));
     initInfo.PipelineInfoMain.RenderPass = renderPass;
     initInfo.PipelineInfoMain.Subpass = 0;
     initInfo.MinImageCount = minImageCount;

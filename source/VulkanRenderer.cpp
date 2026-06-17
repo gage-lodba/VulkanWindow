@@ -24,9 +24,8 @@ VulkanRenderer::VulkanRenderer(GLFWwindow *window, PresentMode presentMode,
   try {
     context = std::make_unique<VulkanContext>(
         window, enableBestPracticesValidation, appName);
-    swapchain = std::make_unique<Swapchain>(*context, window,
-                                            preferredPresentMode,
-                                            formatPreference);
+    swapchain = std::make_unique<Swapchain>(
+        *context, window, preferredPresentMode, formatPreference);
     createCommandPool();
     createCommandBuffers();
     createSyncObjects();
@@ -85,9 +84,9 @@ void VulkanRenderer::createSyncObjects() {
     vkCheck(vkCreateSemaphore(context->device, &semaphoreInfo, nullptr,
                               &imageAvailableSemaphores[i]),
             "Failed to create image-available semaphore");
-    vkCheck(vkCreateFence(context->device, &fenceInfo, nullptr,
-                          &inFlightFences[i]),
-            "Failed to create in-flight fence");
+    vkCheck(
+        vkCreateFence(context->device, &fenceInfo, nullptr, &inFlightFences[i]),
+        "Failed to create in-flight fence");
   }
 
   createPerImageSemaphores();
@@ -128,9 +127,9 @@ void VulkanRenderer::recreateImageAvailableSemaphores() {
   VkSemaphoreCreateInfo semaphoreInfo{};
   semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
   for (auto &semaphore : imageAvailableSemaphores) {
-    vkCheck(vkCreateSemaphore(context->device, &semaphoreInfo, nullptr,
-                              &semaphore),
-            "Failed to recreate image-available semaphore");
+    vkCheck(
+        vkCreateSemaphore(context->device, &semaphoreInfo, nullptr, &semaphore),
+        "Failed to recreate image-available semaphore");
   }
 }
 
@@ -142,14 +141,14 @@ void VulkanRenderer::createImGui() {
   //
   // On an sRGB swap-chain ImGui's sRGB-authored colours would wash out, so tell
   // the manager to linearise the built-in theme to match the format.
-  const bool linearizeStyleColors = vkutil::isSrgbFormat(swapchain->imageFormat);
+  const bool linearizeStyleColors =
+      vkutil::isSrgbFormat(swapchain->imageFormat);
   imguiManager = std::make_unique<ImGuiManager>(
       window, context->instanceApiVersion, context->instance,
       context->physicalDevice, context->device, context->graphicsQueueFamily,
       context->graphicsQueue, swapchain->renderPass, context->pipelineCache,
-      swapchain->minImageCount,
-      static_cast<uint32_t>(swapchain->images.size()), 100, styleCallback,
-      linearizeStyleColors, fontCallback);
+      swapchain->minImageCount, static_cast<uint32_t>(swapchain->images.size()),
+      100, styleCallback, linearizeStyleColors, fontCallback);
 }
 
 void VulkanRenderer::setPresentMode(PresentMode mode) {
@@ -244,8 +243,8 @@ void VulkanRenderer::drawFrame() {
   renderPassInfo.renderArea.extent = swapchain->extent;
 
   VkClearValue clearColorValue{};
-  clearColorValue.color = {{clearColor[0], clearColor[1], clearColor[2],
-                            clearColor[3]}};
+  clearColorValue.color = {
+      {clearColor[0], clearColor[1], clearColor[2], clearColor[3]}};
   VkClearValue clearDepth{};
   clearDepth.depthStencil = {.depth = 1.0f, .stencil = 0};
   std::array clearValues = {clearColorValue, clearDepth};
@@ -394,8 +393,7 @@ void VulkanRenderer::recreateSwapChain() {
   // image count changed; pure extent changes are fine. The old render pass
   // (if any) is held by `res.oldRenderPassToDestroy` for us to destroy after
   // ImGui has been torn down.
-  const bool needFullImGuiRebuild =
-      res.formatChanged || res.imageCountChanged;
+  const bool needFullImGuiRebuild = res.formatChanged || res.imageCountChanged;
 
   if (needFullImGuiRebuild) {
     imguiManager.reset();

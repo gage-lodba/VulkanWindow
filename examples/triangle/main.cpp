@@ -1,18 +1,20 @@
-// Minimal example: draw a coloured triangle with your own VkPipeline, composited
-// under ImGui. Shows the full "bring your own geometry" path on top of the
-// VulkanWindow scaffold:
+// Minimal example: draw a coloured triangle with your own VkPipeline,
+// composited under ImGui. Shows the full "bring your own geometry" path on top
+// of the VulkanWindow scaffold:
 //
 //   * build a pipeline against the handles exposed by Application::getContext()
 //     / getSwapchain() (no forking required),
 //   * record draws from setRenderCallback,
 //   * use dynamic viewport+scissor so a plain resize needs no pipeline work,
-//   * rebuild only on a surface-format change via setSwapchainRecreatedCallback,
+//   * rebuild only on a surface-format change via
+//   setSwapchainRecreatedCallback,
 //   * reuse the scaffold's persistent VkPipelineCache.
 //
 // The triangle has no vertex buffer — positions/colours are baked into the
 // vertex shader and indexed by gl_VertexIndex — to keep the focus on the
 // pipeline and callback wiring rather than resource management.
 
+#include <imgui.h>
 #include <vulkan/vulkan.h>
 
 #include <array>
@@ -20,8 +22,6 @@
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
-
-#include <imgui.h>
 
 #include "Application.h"
 #include "Swapchain.h"
@@ -58,8 +58,8 @@ auto createShaderModule(VkDevice device, const uint32_t *code,
 
 // Owns the triangle's pipeline and wires it into an Application. Construct it
 // after the Application (so the device exists) and destroy it before the
-// Application (so the device is still alive) — local-variable ordering in main()
-// does exactly that.
+// Application (so the device is still alive) — local-variable ordering in
+// main() does exactly that.
 class TriangleExample {
  public:
   explicit TriangleExample(Application &app) : app(app) {
@@ -76,22 +76,23 @@ class TriangleExample {
 
     buildPipeline();
 
-    app.setRenderCallback([this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
-      record(cmd, extent);
-    });
+    app.setRenderCallback(
+        [this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
+          record(cmd, extent);
+        });
 
     // The pipeline bakes in the render pass, so only a surface-format change
     // (which rebuilds the render pass) makes it incompatible. Dynamic
     // viewport+scissor means a plain resize doesn't. The device is idle inside
     // this callback, so destroying the old pipeline here is safe.
-    app.setSwapchainRecreatedCallback([this](const SwapchainRecreateInfo &info)
-                                          -> void {
-      if (info.formatChanged) {
-        vkDestroyPipeline(device, pipeline, nullptr);
-        pipeline = VK_NULL_HANDLE;
-        buildPipeline();
-      }
-    });
+    app.setSwapchainRecreatedCallback(
+        [this](const SwapchainRecreateInfo &info) -> void {
+          if (info.formatChanged) {
+            vkDestroyPipeline(device, pipeline, nullptr);
+            pipeline = VK_NULL_HANDLE;
+            buildPipeline();
+          }
+        });
 
     app.setUICallback([]() -> void {
       ImGui::Begin("Triangle example");

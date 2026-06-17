@@ -86,8 +86,7 @@ class VulkanContext {
   [[nodiscard]] auto checkValidationLayerSupport() const -> bool;
   [[nodiscard]] auto checkDeviceExtensionSupport(
       VkPhysicalDevice physDevice) const -> bool;
-  [[nodiscard]] auto getRequiredExtensions() const
-      -> std::vector<const char *>;
+  [[nodiscard]] auto getRequiredExtensions() const -> std::vector<const char *>;
   [[nodiscard]] static auto rateDeviceSuitability(VkPhysicalDevice physDevice)
       -> int;
 
@@ -96,7 +95,8 @@ class VulkanContext {
   std::string cacheName;
 
   // The unsanitised app name, surfaced to the driver via VkApplicationInfo so
-  // vendor tooling / driver profiles can key on it. Set once in the constructor.
+  // vendor tooling / driver profiles can key on it. Set once in the
+  // constructor.
   std::string applicationName;
 
   // Tracks state required during init that the renderer doesn't need to see.
@@ -107,8 +107,8 @@ class VulkanContext {
   bool pipelineCacheExternallySyncSupported{false};
   // VK_KHR_portability_enumeration is exposed by the loader (e.g. when a
   // MoltenVK portability ICD is installed). When set, the extension is enabled
-  // and VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR is added so portability
-  // devices show up in vkEnumeratePhysicalDevices.
+  // and VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR is added so
+  // portability devices show up in vkEnumeratePhysicalDevices.
   bool portabilityEnumerationEnabled{false};
 
   static constexpr std::array deviceExtensions = {

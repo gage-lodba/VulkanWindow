@@ -108,8 +108,8 @@ TEST_CASE("chooseSwapPresentMode falls back to FIFO when preference absent") {
 // ---- clampSwapExtent --------------------------------------------------------
 
 namespace {
-auto caps(VkExtent2D current, VkExtent2D min, VkExtent2D max)
-    -> VkSurfaceCapabilitiesKHR {
+auto caps(VkExtent2D current, VkExtent2D min,
+          VkExtent2D max) -> VkSurfaceCapabilitiesKHR {
   VkSurfaceCapabilitiesKHR c{};
   c.currentExtent = current;
   c.minImageExtent = min;
@@ -119,7 +119,8 @@ auto caps(VkExtent2D current, VkExtent2D min, VkExtent2D max)
 constexpr uint32_t kUndefined = std::numeric_limits<uint32_t>::max();
 }  // namespace
 
-TEST_CASE("clampSwapExtent returns currentExtent when the surface dictates it") {
+TEST_CASE(
+    "clampSwapExtent returns currentExtent when the surface dictates it") {
   auto c = caps({800, 600}, {1, 1}, {4096, 4096});
   auto e = vkutil::clampSwapExtent(c, 1234, 5678);  // window size ignored
   CHECK(e.width == 800);

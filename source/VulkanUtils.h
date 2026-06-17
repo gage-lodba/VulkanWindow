@@ -45,11 +45,11 @@ struct SwapChainSupportDetails {
 
 /// Find a graphics queue family that also supports presenting to `surface`,
 /// preferring a single family that supports both.
-auto findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
-    -> QueueFamilyIndices;
+auto findQueueFamilies(VkPhysicalDevice device,
+                       VkSurfaceKHR surface) -> QueueFamilyIndices;
 
 /// Query the swap-chain support for a (physical device, surface) pair.
-auto querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface)
-    -> SwapChainSupportDetails;
+auto querySwapChainSupport(VkPhysicalDevice device,
+                           VkSurfaceKHR surface) -> SwapChainSupportDetails;
 
 }  // namespace vkutil

@@ -78,9 +78,8 @@ void vkCheck(VkResult r, const char *what) {
 }
 
 auto srgbToLinear(float channel) -> float {
-  return channel <= 0.04045f
-             ? channel / 12.92f
-             : std::pow((channel + 0.055f) / 1.055f, 2.4f);
+  return channel <= 0.04045f ? channel / 12.92f
+                             : std::pow((channel + 0.055f) / 1.055f, 2.4f);
 }
 
 auto isSrgbFormat(VkFormat format) -> bool {
@@ -96,8 +95,8 @@ auto isSrgbFormat(VkFormat format) -> bool {
   }
 }
 
-auto findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
-    -> QueueFamilyIndices {
+auto findQueueFamilies(VkPhysicalDevice device,
+                       VkSurfaceKHR surface) -> QueueFamilyIndices {
   QueueFamilyIndices indices;
 
   uint32_t queueFamilyCount = 0;
@@ -143,8 +142,8 @@ auto findQueueFamilies(VkPhysicalDevice device, VkSurfaceKHR surface)
   return indices;
 }
 
-auto querySwapChainSupport(VkPhysicalDevice device, VkSurfaceKHR surface)
-    -> SwapChainSupportDetails {
+auto querySwapChainSupport(VkPhysicalDevice device,
+                           VkSurfaceKHR surface) -> SwapChainSupportDetails {
   SwapChainSupportDetails details;
 
   vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, surface,
