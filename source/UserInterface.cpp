@@ -102,7 +102,7 @@ void UserInterface::renderInfoWindow() {
 #else
   ImGui::Text("Docking: not available (master-branch ImGui)");
 #endif
-#ifdef IMGUI_HAS_VIEWPORT
+#ifdef IMGUI_HAS_DOCK
   ImGui::Text(
       "Viewports: %s",
       (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) ? "enabled" : "off");

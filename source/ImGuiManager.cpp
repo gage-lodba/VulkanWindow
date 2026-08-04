@@ -87,9 +87,12 @@ ImGuiManager::ImGuiManager(
     initInfo.MinImageCount = minImageCount;
     initInfo.ImageCount = imageCount;
     initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+#ifdef IMGUI_HAS_DOCK
     // For secondary viewports (multi-viewport). Backend creates the swap-
     // chain + render pass per viewport; we just pin the sample count.
+    // PipelineInfoForViewports only exists in the docking branch.
     initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+#endif
     initInfo.Allocator = nullptr;
     initInfo.CheckVkResultFn = nullptr;
 
@@ -136,7 +139,7 @@ void ImGuiManager::render(VkCommandBuffer commandBuffer) {
 }
 
 void ImGuiManager::renderPlatformWindows() {
-#ifdef IMGUI_HAS_VIEWPORT
+#ifdef IMGUI_HAS_DOCK
   ImGuiIO &io = ImGui::GetIO();
   if (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) {
     // Spawns/destroys/resizes platform windows for secondary viewports, then
@@ -191,7 +194,7 @@ void ImGuiManager::setupStyle() {
   style->Colors[ImGuiCol_ButtonHovered] = ImColor(1.0f, 1.0f, 1.0f, 0.25f);
   style->Colors[ImGuiCol_ButtonActive] = ImColor(1.0f, 1.0f, 1.0f, 0.5f);
 
-#ifdef IMGUI_HAS_VIEWPORT
+#ifdef IMGUI_HAS_DOCK
   // When viewports are enabled an ImGui window dragged out becomes a real OS
   // window. Rounded corners look wrong against a rectangular OS frame, and a
   // translucent WindowBg blends with whatever's behind the host window. The
