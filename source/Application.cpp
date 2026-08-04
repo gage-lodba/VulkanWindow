@@ -84,7 +84,7 @@ void Application::setFontCallback(std::function<void()> callback) {
 }
 
 void Application::setSwapchainRecreatedCallback(
-    std::function<void(const SwapchainRecreateInfo &)> callback) {
+    std::function<void(const SwapchainRecreateInfo&)> callback) {
   renderer->setSwapchainRecreatedCallback(std::move(callback));
 }
 
@@ -124,12 +124,16 @@ void Application::setClearColor(float r, float g, float b, float a) noexcept {
   renderer->setClearColor(r, g, b, a);
 }
 
-auto Application::getContext() const noexcept -> const VulkanContext & {
+auto Application::getContext() const noexcept -> const VulkanContext& {
   return renderer->getContext();
 }
 
-auto Application::getSwapchain() const noexcept -> const Swapchain & {
+auto Application::getSwapchain() const noexcept -> const Swapchain& {
   return renderer->getSwapchain();
+}
+
+auto Application::getWindow() const noexcept -> GLFWwindow* {
+  return window->getGLFWWindow();
 }
 
 auto Application::getFramesInFlight() const noexcept -> uint32_t {
@@ -146,7 +150,7 @@ void Application::run() {
   // closed. The CI smoke test sets this to render a fixed number of frames and
   // then exit cleanly with a zero status.
   uint64_t maxFrames = 0;
-  if (const char *env = std::getenv("VULKANWINDOW_MAX_FRAMES");
+  if (const char* env = std::getenv("VULKANWINDOW_MAX_FRAMES");
       env != nullptr && env[0] != '\0') {
     maxFrames = std::strtoull(env, nullptr, 10);
   }

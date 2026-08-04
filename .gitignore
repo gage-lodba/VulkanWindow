@@ -1,5 +1,10 @@
 .cache/
 .vscode/
+.claude/
+.idea/
+.DS_Store
+*.user
 build/
 build-debug/
+imgui.ini
 CLAUDE.md

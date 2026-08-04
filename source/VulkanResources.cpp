@@ -107,16 +107,16 @@ auto createDeviceLocalBuffer(VmaAllocator allocator, VkDevice device,
   // memory. The subsequent queue submit makes the flushed host writes visible.
   vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
 
-  Buffer result =
-      makeBuffer(allocator, size, usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
-
-  VkCommandPoolCreateInfo poolInfo{};
-  poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-  poolInfo.queueFamilyIndex = queueFamily;
-
   VkCommandPool pool = VK_NULL_HANDLE;
+  Buffer result;
   try {
+    result = makeBuffer(allocator, size,
+                        usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.queueFamilyIndex = queueFamily;
     vkCheck(vkCreateCommandPool(device, &poolInfo, nullptr, &pool),
             "Failed to create transfer command pool");
 
@@ -374,23 +374,22 @@ auto createTexture2D(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
 
   Image result = makeImage(allocator, width, height, mipLevels, format, usage);
 
-  Buffer staging =
-      createMappedBuffer(allocator, dataSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-  if (staging.mapped == nullptr) {
-    destroyBuffer(allocator, staging);
-    destroyImage(allocator, device, result);
-    throw std::runtime_error("Staging buffer was not host-mapped");
-  }
-  std::memcpy(staging.mapped, data, static_cast<size_t>(dataSize));
-  vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
-
-  VkCommandPoolCreateInfo poolInfo{};
-  poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-  poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
-  poolInfo.queueFamilyIndex = queueFamily;
-
   VkCommandPool pool = VK_NULL_HANDLE;
+  Buffer staging;
   try {
+    staging = createMappedBuffer(allocator, dataSize,
+                                 VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    if (staging.mapped == nullptr) {
+      destroyBuffer(allocator, staging);
+      throw std::runtime_error("Staging buffer was not host-mapped");
+    }
+    std::memcpy(staging.mapped, data, static_cast<size_t>(dataSize));
+    vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+
+    VkCommandPoolCreateInfo poolInfo{};
+    poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    poolInfo.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    poolInfo.queueFamilyIndex = queueFamily;
     vkCheck(vkCreateCommandPool(device, &poolInfo, nullptr, &pool),
             "Failed to create transfer command pool");
 

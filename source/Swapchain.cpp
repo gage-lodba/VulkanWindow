@@ -74,14 +74,24 @@ auto Swapchain::recreate(PresentMode preferred) -> RecreateResult {
     renderPass = VK_NULL_HANDLE;
   }
 
-  createImageViews();
-  createDepthResources();
+  // If any step throws after the old render pass has been extracted, the local
+  // handle would leak — the member is already null.  Wrap the rest so a throw
+  // destroys the local and propagates.
+  try {
+    createImageViews();
+    createDepthResources();
 
-  if (formatChanged) {
-    createRenderPass();
+    if (formatChanged) {
+      createRenderPass();
+    }
+
+    createFramebuffers();
+  } catch (...) {
+    if (oldRenderPass != VK_NULL_HANDLE) {
+      vkDestroyRenderPass(ctx.device, oldRenderPass, nullptr);
+    }
+    throw;
   }
-
-  createFramebuffers();
 
   return {.formatChanged = formatChanged,
           .imageCountChanged = imageCountChanged,
@@ -145,7 +155,22 @@ void Swapchain::createSwapchain(PresentMode preferred) {
   }
 
   createInfo.preTransform = support.capabilities.currentTransform;
-  createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+
+  // Prefer opaque (the GLFW window is non-transparent) and fall back to the
+  // first flag the surface advertises — hardcoding OPAQUE fails on surfaces
+  // that don't support it.
+  if (support.capabilities.supportedCompositeAlpha &
+      VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR) {
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+  } else if (support.capabilities.supportedCompositeAlpha &
+             VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
+    createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
+  } else {
+    // Last resort: grab any supported bit.
+    createInfo.compositeAlpha = static_cast<VkCompositeAlphaFlagBitsKHR>(
+        support.capabilities.supportedCompositeAlpha);
+  }
+
   createInfo.presentMode = presentMode;
   createInfo.clipped = VK_TRUE;
 

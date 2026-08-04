@@ -10,11 +10,17 @@ namespace vkutil {
 
 /// Translate VkResult to its symbolic string. Returns "VK_RESULT_<unknown>"
 /// for codes not in the known set.
-auto vkResultString(VkResult r) -> const char *;
+auto vkResultString(VkResult r) -> const char*;
 
 /// Throw std::runtime_error if `r != VK_SUCCESS`, formatted as
 /// "<what>: <vkResultString(r)>".
-void vkCheck(VkResult r, const char *what);
+void vkCheck(VkResult r, const char* what);
+
+/// Create a VkShaderModule from the given SPIR-V bytecode. `code` must be
+/// aligned to a 4-byte boundary. Throws on failure; destroy with
+/// vkDestroyShaderModule.
+[[nodiscard]] auto createShaderModule(VkDevice device, const uint32_t* code,
+                                      size_t sizeBytes) -> VkShaderModule;
 
 /// Convert one sRGB-encoded colour channel in [0, 1] to its linear value via
 /// the standard sRGB transfer function. Alpha is not gamma-encoded and should

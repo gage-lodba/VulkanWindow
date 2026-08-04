@@ -105,6 +105,26 @@ TEST_CASE("chooseSwapPresentMode falls back to FIFO when preference absent") {
         VK_PRESENT_MODE_FIFO_KHR);
 }
 
+TEST_CASE(
+    "chooseSwapPresentMode with empty list returns FIFO for Vsync (last "
+    "resort)") {
+  // The spec guarantees FIFO is always available, but chooseSwapPresentMode
+  // handles the degenerate empty-list case defensively.
+  const std::vector<VkPresentModeKHR> empty;
+  CHECK(vkutil::chooseSwapPresentMode(empty, PresentMode::Vsync) ==
+        VK_PRESENT_MODE_FIFO_KHR);
+}
+
+TEST_CASE(
+    "chooseSwapPresentMode with empty list falls back to FIFO for non-Vsync "
+    "preferences") {
+  const std::vector<VkPresentModeKHR> empty;
+  CHECK(vkutil::chooseSwapPresentMode(empty, PresentMode::Mailbox) ==
+        VK_PRESENT_MODE_FIFO_KHR);
+  CHECK(vkutil::chooseSwapPresentMode(empty, PresentMode::Immediate) ==
+        VK_PRESENT_MODE_FIFO_KHR);
+}
+
 // ---- clampSwapExtent --------------------------------------------------------
 
 namespace {

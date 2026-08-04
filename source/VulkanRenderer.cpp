@@ -350,6 +350,19 @@ void VulkanRenderer::drawFrame() {
 }
 
 void VulkanRenderer::recreateSwapChain() {
+  // Per Vulkan spec, when vkAcquireNextImageKHR returns
+  // VK_ERROR_OUT_OF_DATE_KHR the supplied semaphore is left in an indeterminate
+  // state — it cannot be safely reused or waited on.  Destroy and recreate it
+  // now, before the 0×0 check (which would return early with the flag still
+  // set and the indeterminate semaphore still in the vector — the next
+  // vkAcquireNextImageKHR would use it again, violating
+  // VUID-vkAcquireNextImageKHR-semaphore-01782).
+  if (acquireSemaphoresInvalid) {
+    vkDeviceWaitIdle(context->device);
+    recreateImageAvailableSemaphores();
+    acquireSemaphoresInvalid = false;
+  }
+
   int width = 0;
   int height = 0;
   glfwGetFramebufferSize(window, &width, &height);
@@ -371,17 +384,6 @@ void VulkanRenderer::recreateSwapChain() {
   // vector immediately so a throw before recreation doesn't leave dangling
   // handles for the destructor to free a second time.
   destroyRenderFinishedSemaphores();
-
-  // Per Vulkan spec, when vkAcquireNextImageKHR returns
-  // VK_ERROR_OUT_OF_DATE_KHR the supplied semaphore is left in an indeterminate
-  // state — it cannot be safely reused or waited on. Only on that path
-  // (signalled via acquireSemaphoresInvalid) do we tear down and recreate; on
-  // the suboptimal / framebufferResized paths the semaphore was used and
-  // unsignaled normally.
-  if (acquireSemaphoresInvalid) {
-    recreateImageAvailableSemaphores();
-    acquireSemaphoresInvalid = false;
-  }
 
   const uint32_t oldMinImageCount = swapchain->minImageCount;
 

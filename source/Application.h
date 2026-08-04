@@ -14,6 +14,7 @@ class Window;
 class VulkanContext;
 class Swapchain;
 struct SwapchainRecreateInfo;
+struct GLFWwindow;
 
 class Application {
  public:
@@ -31,10 +32,10 @@ class Application {
   ~Application();
 
   // Non-copyable, non-movable
-  Application(const Application &) = delete;
-  auto operator=(const Application &) -> Application & = delete;
-  Application(Application &&) = delete;
-  auto operator=(Application &&) -> Application & = delete;
+  Application(const Application&) = delete;
+  auto operator=(const Application&) -> Application& = delete;
+  Application(Application&&) = delete;
+  auto operator=(Application&&) -> Application& = delete;
 
   void run();
 
@@ -80,7 +81,7 @@ class Application {
   /// Must be called from the thread that constructed Application; not safe to
   /// invoke concurrently with run().
   void setSwapchainRecreatedCallback(
-      std::function<void(const SwapchainRecreateInfo &)> callback);
+      std::function<void(const SwapchainRecreateInfo&)> callback);
 
   /// Input callbacks. Each replaces any previously set callback of the same
   /// kind; pass an empty std::function to clear. ImGui's GLFW backend chains
@@ -137,8 +138,11 @@ class Application {
   // them each frame and prefer dynamic viewport+scissor so a resize doesn't
   // force pipeline recreation (only a surface-format change does).
 
-  [[nodiscard]] auto getContext() const noexcept -> const VulkanContext &;
-  [[nodiscard]] auto getSwapchain() const noexcept -> const Swapchain &;
+  [[nodiscard]] auto getContext() const noexcept -> const VulkanContext&;
+  [[nodiscard]] auto getSwapchain() const noexcept -> const Swapchain&;
+  /// Raw GLFW window handle — for calls that need the window directly
+  /// (e.g. glfwSetWindowShouldClose). Valid for the Application's lifetime.
+  [[nodiscard]] auto getWindow() const noexcept -> GLFWwindow*;
 
   /// Number of frames the renderer queues ahead of the GPU (set at
   /// construction). Size your per-frame resources by this and index them with

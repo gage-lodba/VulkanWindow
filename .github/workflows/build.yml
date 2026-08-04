@@ -89,7 +89,8 @@ jobs:
         # part of xorg-dev, so it stays explicit.
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev glslc \
+          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev \
+            mesa-vulkan-drivers glslc \
             xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols clang-tidy clang-format-18
 
@@ -105,7 +106,7 @@ jobs:
           clang-format-18 --dry-run --Werror \
             source/*.cpp source/*.h \
             examples/*/*.cpp \
-            tests/*.cpp
+            tests/*.cpp tests/*.h
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
@@ -126,9 +127,23 @@ jobs:
         run: cmake --build build --config Release
 
       - name: Run unit tests
-        # Pure-logic tests (selectors, colour/format helpers) — no GPU, ICD, or
-        # display needed, so they run on the plain runner.
-        run: ctest --test-dir build --output-on-failure
+        # Pure-logic tests (selectors, colour/format helpers) run anywhere;
+        # the GPU-resource tests (test_resources.cpp, test_descriptors.cpp)
+        # need an ICD, so point the loader at lavapipe (installed above via
+        # mesa-vulkan-drivers). The fixture self-skips when no ICD is found,
+        # so assert both that the manifest exists and that the "context ready"
+        # marker actually appeared — otherwise a packaging regression could
+        # hide the GPU tests behind a green ctest.
+        run: |
+          LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
+          if [ -z "$LVP" ]; then
+            echo "::error::lavapipe ICD not found — GPU-resource unit tests would be skipped"
+            exit 1
+          fi
+          export VK_ICD_FILENAMES="$LVP" VK_DRIVER_FILES="$LVP"
+          ctest --test-dir build --output-on-failure -V 2>&1 | tee ctest.log
+          grep -q "VulkanTestFixture: context ready" ctest.log \
+            || { echo "::error::GPU-resource tests did not run (fixture skipped)"; exit 1; }
 
       - name: Verify examples built
         # glslc is installed, so the example targets MUST exist. If they don't,

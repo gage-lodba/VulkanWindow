@@ -6,7 +6,7 @@
 
 namespace vkutil {
 
-auto vkResultString(VkResult r) -> const char * {
+auto vkResultString(VkResult r) -> const char* {
   switch (r) {
     case VK_SUCCESS:
       return "VK_SUCCESS";
@@ -71,7 +71,20 @@ auto vkResultString(VkResult r) -> const char * {
   }
 }
 
-void vkCheck(VkResult r, const char *what) {
+auto createShaderModule(VkDevice device, const uint32_t* code,
+                        size_t sizeBytes) -> VkShaderModule {
+  VkShaderModuleCreateInfo info{};
+  info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+  info.codeSize = sizeBytes;
+  info.pCode = code;
+
+  VkShaderModule shaderModule = VK_NULL_HANDLE;
+  vkCheck(vkCreateShaderModule(device, &info, nullptr, &shaderModule),
+          "Failed to create shader module");
+  return shaderModule;
+}
+
+void vkCheck(VkResult r, const char* what) {
   if (r != VK_SUCCESS) {
     throw std::runtime_error(std::string(what) + ": " + vkResultString(r));
   }

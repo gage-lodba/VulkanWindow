@@ -369,9 +369,13 @@ only when a `v*` tag is pushed.
 
 The unit tests (`tests/`, [doctest](https://github.com/doctest/doctest)) cover
 the library's pure logic — surface-format / present-mode / extent selection,
-cache-name sanitization, and the colour-format helpers — none of which need a
-GPU, so they run on the plain runner. They complement the smoke tests, which
-exercise the runtime GPU path.
+cache-name sanitization, colour-format helpers, and every `VkResult` string —
+as well as GPU-resource helpers (buffer, image, sampler, descriptor, and
+command-buffer creation) and queue-family / swap-chain support queries. The
+GPU-resource tests need a Vulkan ICD at runtime and self-skip when none is
+present; the Linux CI runner installs Mesa **lavapipe** (software Vulkan) and
+routes the loader to it via `VK_ICD_FILENAMES`. They complement the smoke
+tests, which exercise the full application GPU path.
 
 Two **smoke-test** jobs build a Debug configuration (validation layers and
 synchronization validation compiled in) and run the demo plus both examples

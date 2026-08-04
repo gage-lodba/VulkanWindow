@@ -1,5 +1,11 @@
-# Unit tests for the pure (no Vulkan instance / device / window) logic in the
-# library. doctest is fetched only here, so it never touches a consumer build.
+# Unit tests for the library. doctest is fetched only here, so it never
+# touches a consumer build.
+#
+# Most tests are pure-logic (no Vulkan instance / device / window); the GPU-
+# resource tests (test_resources.cpp, test_descriptors.cpp) need a Vulkan ICD
+# at runtime and self-skip when none is present. In CI, the linux job installs
+# mesa-vulkan-drivers (lavapipe) and sets VK_ICD_FILENAMES so those tests run
+# against the software ICD.
 include(FetchContent)
 FetchContent_Declare(
   doctest
@@ -20,7 +26,10 @@ target_include_directories(doctest INTERFACE ${doctest_SOURCE_DIR})
 add_executable(VulkanWindowTests
   test_main.cpp
   test_utils.cpp
-  test_selectors.cpp)
+  test_selectors.cpp
+  test_resources.cpp
+  test_descriptors.cpp
+  test_utils_gpu.cpp)
 
 # Link the library to reach its headers + the functions under test. The tests
 # only call pure functions, but the static lib's transitive deps (Vulkan, GLFW,
@@ -28,5 +37,8 @@ add_executable(VulkanWindowTests
 target_link_libraries(VulkanWindowTests PRIVATE
   VulkanWindow::VulkanWindow
   doctest::doctest)
+# So that #include "test_fixture.h" resolves from within test TUs.
+target_include_directories(VulkanWindowTests PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME VulkanWindowUnitTests COMMAND VulkanWindowTests)

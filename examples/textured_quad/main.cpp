@@ -23,6 +23,7 @@
 #include "VulkanDescriptors.h"
 #include "VulkanRenderer.h"  // SwapchainRecreateInfo
 #include "VulkanResources.h"
+#include "VulkanUtils.h"
 
 namespace {
 
@@ -66,26 +67,12 @@ auto makeCheckerboard(uint32_t size) -> std::vector<uint8_t> {
   return pixels;
 }
 
-auto createShaderModule(VkDevice device, const uint32_t *code,
-                        size_t sizeBytes) -> VkShaderModule {
-  VkShaderModuleCreateInfo info{};
-  info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  info.codeSize = sizeBytes;
-  info.pCode = code;
-  VkShaderModule shaderModule = VK_NULL_HANDLE;
-  if (vkCreateShaderModule(device, &info, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("Failed to create shader module");
-  }
-  return shaderModule;
-}
-
 }  // namespace
 
 class TexturedQuadExample {
  public:
-  explicit TexturedQuadExample(Application &app) : app(app) {
-    const VulkanContext &ctx = app.getContext();
+  explicit TexturedQuadExample(Application& app) : app(app) {
+    const VulkanContext& ctx = app.getContext();
     device = ctx.device;
     allocator = ctx.allocator;
     pipelineCache = ctx.pipelineCache;
@@ -95,40 +82,61 @@ class TexturedQuadExample {
         allocator, device, ctx.graphicsQueue, ctx.graphicsQueueFamily,
         kQuad.data(), sizeof(kQuad), VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
-    // Texture (mipmapped) + sampler. UNORM (not _SRGB) so the checkerboard's
-    // authored byte values pass through unchanged to the default Unorm
-    // swap-chain — the shader samples and writes them verbatim. A real sRGB
-    // colour texture feeding a linear-space lit pipeline would instead use an
-    // _SRGB format (and typically an Srgb swap-chain) so the GPU linearises on
-    // sample and re-encodes on store.
-    const std::vector<uint8_t> pixels = makeCheckerboard(kTextureSize);
-    texture = vkutil::createTexture2D(
-        allocator, ctx.physicalDevice, device, ctx.graphicsQueue,
-        ctx.graphicsQueueFamily, pixels.data(), pixels.size(), kTextureSize,
-        kTextureSize, VK_FORMAT_R8G8B8A8_UNORM, /*generateMipmaps=*/true);
-    sampler = vkutil::createSampler(device);
+    // Wrap subsequent resource creation so a throw mid-constructor cleans up
+    // everything already allocated — the destructor won't run for a partially
+    // constructed object.
+    try {
+      // Texture (mipmapped) + sampler.
+      const std::vector<uint8_t> pixels = makeCheckerboard(kTextureSize);
+      texture = vkutil::createTexture2D(
+          allocator, ctx.physicalDevice, device, ctx.graphicsQueue,
+          ctx.graphicsQueueFamily, pixels.data(), pixels.size(), kTextureSize,
+          kTextureSize, VK_FORMAT_R8G8B8A8_UNORM, /*generateMipmaps=*/true);
+      sampler = vkutil::createSampler(device);
 
-    // Descriptor set: one combined image sampler, pointed at the texture.
-    descriptorSetLayout = vkutil::createDescriptorSetLayout(
-        device, {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                  VK_SHADER_STAGE_FRAGMENT_BIT}});
-    descriptorPool = vkutil::createDescriptorPool(
-        device, {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}}, 1);
-    descriptorSet = vkutil::allocateDescriptorSet(device, descriptorPool,
-                                                  descriptorSetLayout);
-    vkutil::updateImageSamplerDescriptor(device, descriptorSet, 0, texture.view,
-                                         sampler);
+      // Descriptor set: one combined image sampler, pointed at the texture.
+      descriptorSetLayout = vkutil::createDescriptorSetLayout(
+          device, {{0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                    VK_SHADER_STAGE_FRAGMENT_BIT}});
+      descriptorPool = vkutil::createDescriptorPool(
+          device, {{VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1}}, 1);
+      descriptorSet = vkutil::allocateDescriptorSet(device, descriptorPool,
+                                                    descriptorSetLayout);
+      vkutil::updateImageSamplerDescriptor(device, descriptorSet, 0,
+                                           texture.view, sampler);
 
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &descriptorSetLayout;
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) !=
-        VK_SUCCESS) {
-      throw std::runtime_error("Failed to create pipeline layout");
+      VkPipelineLayoutCreateInfo layoutInfo{};
+      layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+      layoutInfo.setLayoutCount = 1;
+      layoutInfo.pSetLayouts = &descriptorSetLayout;
+      if (vkCreatePipelineLayout(device, &layoutInfo, nullptr,
+                                 &pipelineLayout) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create pipeline layout");
+      }
+
+      buildPipeline();
+    } catch (...) {
+      // Tear down in reverse order — only what was actually created.
+      if (pipelineLayout != VK_NULL_HANDLE) {
+        vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+        pipelineLayout = VK_NULL_HANDLE;
+      }
+      if (descriptorPool != VK_NULL_HANDLE) {
+        vkDestroyDescriptorPool(device, descriptorPool, nullptr);
+        descriptorPool = VK_NULL_HANDLE;
+      }
+      if (descriptorSetLayout != VK_NULL_HANDLE) {
+        vkDestroyDescriptorSetLayout(device, descriptorSetLayout, nullptr);
+        descriptorSetLayout = VK_NULL_HANDLE;
+      }
+      if (sampler != VK_NULL_HANDLE) {
+        vkDestroySampler(device, sampler, nullptr);
+        sampler = VK_NULL_HANDLE;
+      }
+      vkutil::destroyImage(allocator, device, texture);
+      vkutil::destroyBuffer(allocator, vertexBuffer);
+      throw;
     }
-
-    buildPipeline();
 
     app.setRenderCallback(
         [this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
@@ -139,7 +147,7 @@ class TexturedQuadExample {
     // pass); dynamic viewport+scissor handles plain resizes. Device is idle in
     // this callback, so rebuilding here is safe.
     app.setSwapchainRecreatedCallback(
-        [this](const SwapchainRecreateInfo &info) -> void {
+        [this](const SwapchainRecreateInfo& info) -> void {
           if (info.formatChanged) {
             vkDestroyPipeline(device, pipeline, nullptr);
             pipeline = VK_NULL_HANDLE;
@@ -169,19 +177,19 @@ class TexturedQuadExample {
     vkutil::destroyBuffer(allocator, vertexBuffer);
   }
 
-  TexturedQuadExample(const TexturedQuadExample &) = delete;
-  auto operator=(const TexturedQuadExample &) -> TexturedQuadExample & = delete;
-  TexturedQuadExample(TexturedQuadExample &&) = delete;
-  auto operator=(TexturedQuadExample &&) -> TexturedQuadExample & = delete;
+  TexturedQuadExample(const TexturedQuadExample&) = delete;
+  auto operator=(const TexturedQuadExample&) -> TexturedQuadExample& = delete;
+  TexturedQuadExample(TexturedQuadExample&&) = delete;
+  auto operator=(TexturedQuadExample&&) -> TexturedQuadExample& = delete;
 
  private:
   void buildPipeline() {
     VkRenderPass renderPass = app.getSwapchain().renderPass;
 
     VkShaderModule vert =
-        createShaderModule(device, kQuadVertSpv, sizeof(kQuadVertSpv));
+        vkutil::createShaderModule(device, kQuadVertSpv, sizeof(kQuadVertSpv));
     VkShaderModule frag =
-        createShaderModule(device, kQuadFragSpv, sizeof(kQuadFragSpv));
+        vkutil::createShaderModule(device, kQuadFragSpv, sizeof(kQuadFragSpv));
 
     std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -315,7 +323,7 @@ class TexturedQuadExample {
     vkCmdDraw(cmd, static_cast<uint32_t>(kQuad.size()), 1, 0, 0);
   }
 
-  Application &app;
+  Application& app;
   VkDevice device{VK_NULL_HANDLE};
   VmaAllocator allocator{VK_NULL_HANDLE};
   VkPipelineCache pipelineCache{VK_NULL_HANDLE};
@@ -342,7 +350,7 @@ auto main() -> int {
       ImGui::End();
     });
     app.run();
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << "Fatal error: " << e.what() << '\n';
     return 1;
   }

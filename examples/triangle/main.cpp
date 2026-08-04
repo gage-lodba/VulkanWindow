@@ -27,6 +27,7 @@
 #include "Swapchain.h"
 #include "VulkanContext.h"
 #include "VulkanRenderer.h"  // PresentMode, SwapchainRecreateInfo
+#include "VulkanUtils.h"
 
 namespace {
 
@@ -39,21 +40,6 @@ constexpr uint32_t kTriangleFragSpv[] =
 #include "triangle.frag.spv.inc"
     ;
 
-auto createShaderModule(VkDevice device, const uint32_t *code,
-                        size_t sizeBytes) -> VkShaderModule {
-  VkShaderModuleCreateInfo info{};
-  info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-  info.codeSize = sizeBytes;
-  info.pCode = code;
-
-  VkShaderModule shaderModule = VK_NULL_HANDLE;
-  if (vkCreateShaderModule(device, &info, nullptr, &shaderModule) !=
-      VK_SUCCESS) {
-    throw std::runtime_error("Failed to create shader module");
-  }
-  return shaderModule;
-}
-
 }  // namespace
 
 // Owns the triangle's pipeline and wires it into an Application. Construct it
@@ -62,8 +48,8 @@ auto createShaderModule(VkDevice device, const uint32_t *code,
 // main() does exactly that.
 class TriangleExample {
  public:
-  explicit TriangleExample(Application &app) : app(app) {
-    const VulkanContext &ctx = app.getContext();
+  explicit TriangleExample(Application& app) : app(app) {
+    const VulkanContext& ctx = app.getContext();
     device = ctx.device;
     pipelineCache = ctx.pipelineCache;
 
@@ -74,7 +60,13 @@ class TriangleExample {
       throw std::runtime_error("Failed to create pipeline layout");
     }
 
-    buildPipeline();
+    try {
+      buildPipeline();
+    } catch (...) {
+      vkDestroyPipelineLayout(device, pipelineLayout, nullptr);
+      pipelineLayout = VK_NULL_HANDLE;
+      throw;
+    }
 
     app.setRenderCallback(
         [this](VkCommandBuffer cmd, VkExtent2D extent) -> void {
@@ -86,7 +78,7 @@ class TriangleExample {
     // viewport+scissor means a plain resize doesn't. The device is idle inside
     // this callback, so destroying the old pipeline here is safe.
     app.setSwapchainRecreatedCallback(
-        [this](const SwapchainRecreateInfo &info) -> void {
+        [this](const SwapchainRecreateInfo& info) -> void {
           if (info.formatChanged) {
             vkDestroyPipeline(device, pipeline, nullptr);
             pipeline = VK_NULL_HANDLE;
@@ -114,19 +106,19 @@ class TriangleExample {
     }
   }
 
-  TriangleExample(const TriangleExample &) = delete;
-  auto operator=(const TriangleExample &) -> TriangleExample & = delete;
-  TriangleExample(TriangleExample &&) = delete;
-  auto operator=(TriangleExample &&) -> TriangleExample & = delete;
+  TriangleExample(const TriangleExample&) = delete;
+  auto operator=(const TriangleExample&) -> TriangleExample& = delete;
+  TriangleExample(TriangleExample&&) = delete;
+  auto operator=(TriangleExample&&) -> TriangleExample& = delete;
 
  private:
   void buildPipeline() {
     VkRenderPass renderPass = app.getSwapchain().renderPass;
 
-    VkShaderModule vert =
-        createShaderModule(device, kTriangleVertSpv, sizeof(kTriangleVertSpv));
-    VkShaderModule frag =
-        createShaderModule(device, kTriangleFragSpv, sizeof(kTriangleFragSpv));
+    VkShaderModule vert = vkutil::createShaderModule(device, kTriangleVertSpv,
+                                                     sizeof(kTriangleVertSpv));
+    VkShaderModule frag = vkutil::createShaderModule(device, kTriangleFragSpv,
+                                                     sizeof(kTriangleFragSpv));
 
     std::array<VkPipelineShaderStageCreateInfo, 2> stages{};
     stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -245,7 +237,7 @@ class TriangleExample {
     vkCmdDraw(cmd, 3, 1, 0, 0);
   }
 
-  Application &app;
+  Application& app;
   VkDevice device{VK_NULL_HANDLE};
   VkPipelineCache pipelineCache{VK_NULL_HANDLE};
   VkPipelineLayout pipelineLayout{VK_NULL_HANDLE};
@@ -261,7 +253,7 @@ auto main() -> int {
     TriangleExample triangle(app);
 
     app.run();
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << "Fatal error: " << e.what() << '\n';
     return 1;
   }
