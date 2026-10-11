@@ -1,4 +1,4 @@
-﻿---
+---
 Checks:          'clang-diagnostic-*,clang-analyzer-*,modernize-*,google-*'
 WarningsAsErrors: ''
 HeaderFileExtensions:
@@ -13,7 +13,6 @@ ImplementationFileExtensions:
   - cpp
   - cxx
 HeaderFilterRegex: 'source/.*'
-ExcludeHeaderFilterRegex: ''
 FormatStyle:     none
 CheckOptions:    {}
 SystemHeaders:   false

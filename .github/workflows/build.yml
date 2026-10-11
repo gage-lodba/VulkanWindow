@@ -15,6 +15,7 @@ on:
       - '.github/workflows/**'
       - 'source/**'
       - 'examples/**'
+      - 'tests/**'
       - 'cmake/**'
       - 'CMakeLists.txt'
 
@@ -62,6 +63,31 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Verify examples built
+        # The Vulkan SDK installed above ships glslc, so the example targets
+        # MUST exist. If they don't, vulkanwindow_add_shaders()'s guard
+        # silently return()'d — fail rather than let a no-examples build pass
+        # green, exactly as the linux and macos jobs do.
+        #
+        # Visual Studio is the default generator on this runner and it is a
+        # multi-configuration one: the per-config subdirectory is appended to
+        # each target's own binary directory, so a target defined in
+        # examples/<name>/ lands in build/examples/<name>/Release/. The root
+        # target follows the same rule — hence the artifact step below
+        # uploading build/Release/VulkanWindow.exe.
+        shell: pwsh
+        run: |
+          $bins = @(
+            'build/examples/triangle/Release/VulkanWindowTriangle.exe',
+            'build/examples/textured_quad/Release/VulkanWindowTexturedQuad.exe'
+          )
+          foreach ($bin in $bins) {
+            if (-not (Test-Path -PathType Leaf $bin)) {
+              echo "::error::expected example binary missing: $bin (glslc not found at configure?)"
+              exit 1
+            }
+          }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -134,7 +160,27 @@ jobs:
         # so assert both that the manifest exists and that the "context ready"
         # marker actually appeared — otherwise a packaging regression could
         # hide the GPU tests behind a green ctest.
+        #
+        # `set -euo pipefail` is load-bearing: without pipefail the pipeline's
+        # status is tee's (always 0), so a red — or aborted — ctest would still
+        # leave the job green.
+        #
+        # The "context ready" marker only proves the fixture was constructed
+        # once, so assert how many test cases actually ran as well: dropping a
+        # whole TU from tests/CMakeLists.txt (or #if-ing one out) would
+        # otherwise keep CI green with tests silently gone.
+        #
+        # This is a FLOOR, not an exact count, on purpose. Pinning the exact
+        # number makes every honest test addition a red build, and a guard that
+        # cries wolf gets its number rubber-stamped — which is how test-loss
+        # detection quietly stops working. Raising the floor when you add tests
+        # is encouraged; lowering it means tests were deliberately deleted and
+        # should be justified in the commit.
         run: |
+          set -euo pipefail
+
+          MIN_TEST_CASES=55
+
           LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
           if [ -z "$LVP" ]; then
             echo "::error::lavapipe ICD not found — GPU-resource unit tests would be skipped"
@@ -144,6 +190,42 @@ jobs:
           ctest --test-dir build --output-on-failure -V 2>&1 | tee ctest.log
           grep -q "VulkanTestFixture: context ready" ctest.log \
             || { echo "::error::GPU-resource tests did not run (fixture skipped)"; exit 1; }
+
+          # doctest right-aligns each count into a fixed-width column and colours
+          # it when it thinks it is on a terminal, so normalise the log before
+          # parsing instead of depending on the exact spacing.
+          summary="$(sed -e 's/\x1b\[[0-9;]*m//g' -e 's/  */ /g' ctest.log \
+            | grep -m1 'test cases:' || true)"
+          if [ -z "$summary" ]; then
+            echo "::error::no doctest summary line in ctest.log — did the test binary run?"
+            exit 1
+          fi
+          echo "doctest summary: $summary"
+
+          # Pull the "N passed" and "N failed" fields out of the summary line.
+          # awk with a whitespace-and-pipe field split avoids relying on grep's
+          # handling of a space-quantifier, which is not portable across grep
+          # builds. Both counts are read: the floor alone is satisfied by a run
+          # that has failures (59 cases, 55 passed, 4 failed still clears it).
+          counts="$(printf '%s\n' "$summary" \
+            | awk -F'[ |]+' '/test cases:/ { p=""; f=""; for (i = 1; i <= NF; i++) { if ($i == "passed") p = $(i - 1); if ($i == "failed") f = $(i - 1) } print p, f; exit }')"
+          passed="${counts%% *}"
+          failed="${counts##* }"
+          if [ -z "$passed" ] || [ -z "$failed" ]; then
+            echo "::error::could not parse the pass/fail counts out of: $summary"
+            echo "::error::every case must pass — a failure or skip changes this line's shape"
+            exit 1
+          fi
+          if [ "$failed" -ne 0 ]; then
+            echo "::error::doctest reported $failed failing test case(s)"
+            exit 1
+          fi
+          if [ "$passed" -lt "$MIN_TEST_CASES" ]; then
+            echo "::error::only $passed test cases passed, expected at least $MIN_TEST_CASES"
+            echo "::error::a whole test TU may have been dropped from tests/CMakeLists.txt"
+            echo "::error::if tests were intentionally removed, lower MIN_TEST_CASES in this step"
+            exit 1
+          fi
 
       - name: Verify examples built
         # glslc is installed, so the example targets MUST exist. If they don't,
@@ -427,6 +509,30 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
 
+      - name: Rename the macOS binary for publishing
+        # action-gh-release names each asset after its file's basename, so
+        # listing "macos-latest/VulkanWindow" beside "ubuntu-latest/VulkanWindow"
+        # would publish two assets both called "VulkanWindow". The action globs
+        # the list and uploads the files in parallel, deleting any existing
+        # asset of the same name first — so one platform's binary would
+        # silently replace the other. Rename the macOS copy instead, keeping
+        # it under its artifact directory like the other two entries.
+        run: |
+          test -f macos-latest/VulkanWindow \
+            || { echo "::error::macos-latest/VulkanWindow missing — did the macOS job upload its artifact?"; exit 1; }
+          mv macos-latest/VulkanWindow macos-latest/VulkanWindow-macos
+
+      - name: Make the Unix binaries executable
+        # actions/upload-artifact normalises permissions, so the Linux and macOS
+        # artifacts come back as 644 — a published asset that can't be executed
+        # without a manual chmod. Restore the bit before publishing. (The
+        # Windows asset is a .exe and needs nothing.)
+        run: |
+          for b in ubuntu-latest/VulkanWindow macos-latest/VulkanWindow-macos; do
+            test -f "$b" || { echo "::error::expected release asset missing: $b"; exit 1; }
+            chmod +x "$b"
+          done
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
@@ -435,6 +541,9 @@ jobs:
           body: |
             **Built by GitHub Actions**
             [Workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          # The macOS entry is the copy renamed above: its asset name is
+          # "VulkanWindow-macos", which can't collide with the Linux asset.
           files: |
             ubuntu-latest/VulkanWindow
             windows-latest/VulkanWindow.exe
+            macos-latest/VulkanWindow-macos
