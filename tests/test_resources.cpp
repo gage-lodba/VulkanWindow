@@ -57,6 +57,51 @@ TEST_CASE("createMappedBuffer can hold floating-point data") {
 }
 
 // -----------------------------------------------------------------------------
+// flushMapped
+// -----------------------------------------------------------------------------
+
+TEST_CASE(
+    "flushMapped succeeds on a mapped buffer and preserves its contents") {
+  VulkanTestFixture fx;
+  if (!fx) return;
+
+  constexpr VkDeviceSize kSize = 128;
+  vkutil::Buffer buf = vkutil::createMappedBuffer(
+      fx.allocator, kSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+  REQUIRE(buf.mapped != nullptr);
+
+  std::memset(buf.mapped, 0x5A, static_cast<size_t>(kSize));
+
+  // Must not throw: vmaFlushAllocation only calls vkFlushMappedMemoryRanges for
+  // non-coherent allocations, so on the coherent memory most drivers hand out
+  // this is a no-op, and on the rest it has to make the write visible.
+  CHECK_NOTHROW(vkutil::flushMapped(fx.allocator, buf));
+
+  // Flushing publishes the CPU writes; it must not alter them.
+  const auto* bytes = static_cast<const uint8_t*>(buf.mapped);
+  CHECK(bytes[0] == 0x5A);
+  CHECK(bytes[kSize - 1] == 0x5A);
+
+  vkutil::destroyBuffer(fx.allocator, buf);
+}
+
+TEST_CASE("flushMapped is a no-op on an empty or destroyed buffer") {
+  VulkanTestFixture fx;
+  if (!fx) return;
+
+  // A default-constructed Buffer has no allocation; flushMapped returns before
+  // touching VMA, so it can't be handed a null allocation.
+  vkutil::Buffer empty;
+  CHECK_NOTHROW(vkutil::flushMapped(fx.allocator, empty));
+
+  // Same after destroyBuffer() has nulled the handles.
+  vkutil::Buffer buf = vkutil::createMappedBuffer(
+      fx.allocator, 64, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+  vkutil::destroyBuffer(fx.allocator, buf);
+  CHECK_NOTHROW(vkutil::flushMapped(fx.allocator, buf));
+}
+
+// -----------------------------------------------------------------------------
 // createDeviceLocalBuffer
 // -----------------------------------------------------------------------------
 

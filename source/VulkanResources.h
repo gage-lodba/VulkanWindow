@@ -41,11 +41,26 @@ struct Buffer {
                                            VkBufferUsageFlags usage) -> Buffer;
 
 /// Create a host-visible, persistently-mapped buffer for data you write from
-/// the CPU (uniforms, dynamic vertices). Write through `Buffer::mapped`; the
-/// writes are made visible to the GPU on the next queue submit. Intended for
-/// sequential writes (e.g. memcpy) — don't read it back. Throws on failure.
+/// the CPU (uniforms, dynamic vertices). Write through `Buffer::mapped`.
+/// Intended for sequential writes (e.g. memcpy) — don't read it back.
+///
+/// Visibility: host writes are not guaranteed visible to the GPU until the
+/// memory is flushed. The allocation may be non-coherent, so call flushMapped()
+/// after writing and before the queue submit that reads it. On coherent memory
+/// (the common case on discrete GPUs) the flush is a cheap no-op, and a
+/// subsequent vkQueueSubmit makes the writes visible, so flushing once per
+/// frame after the frame's writes is both sufficient and portable.
+/// Throws on failure.
 [[nodiscard]] auto createMappedBuffer(VmaAllocator allocator, VkDeviceSize size,
                                       VkBufferUsageFlags usage) -> Buffer;
+
+/// Make CPU writes into a createMappedBuffer() buffer visible to the GPU. Call
+/// after writing through `Buffer::mapped` and before submitting work that reads
+/// it. On coherent memory VMA skips the flush entirely (it only calls
+/// vkFlushMappedMemoryRanges for non-coherent allocations), so this is cheap
+/// enough to call unconditionally. A no-op on an empty/destroyed Buffer.
+/// Throws on failure.
+void flushMapped(VmaAllocator allocator, const Buffer &buffer);
 
 /// Destroy a buffer created by the helpers above and null its handles. A no-op
 /// on a default-constructed / already-destroyed Buffer.
