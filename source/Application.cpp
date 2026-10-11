@@ -156,6 +156,15 @@ void Application::run() {
   }
   uint64_t framesRendered = 0;
 
+  // Finish ImGui initialisation now that the app has had its chance to call
+  // setStyleCallback / setFontCallback. Those callbacks cannot run during
+  // Application's construction (the app's code has not executed yet), and a
+  // style callback has to be applied *before* ImGui's backends are initialised
+  // because they latch some io.ConfigFlags state at init — most visibly
+  // ImGuiBackendFlags_PlatformHasViewports. Idempotent, so calling run() twice
+  // is harmless.
+  renderer->finalizeInit();
+
   // Main application loop
   while (!window->shouldClose()) {
     // Process window events first so cached width/height reflect the latest

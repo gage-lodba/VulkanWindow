@@ -9,11 +9,11 @@
 
 #include "VulkanUtils.h"  // srgbToLinear
 
-// PipelineInfoMain was introduced 2025-09-26 (Dear ImGui v1.92.2). Earlier
-// releases use flat RenderPass/Subpass/MSAASamples fields on
+// PipelineInfoMain was introduced 2025-09-26 and shipped in Dear ImGui v1.92.4.
+// Earlier releases use flat RenderPass/Subpass/MSAASamples fields on
 // ImGui_ImplVulkan_InitInfo and won't compile against this manager.
-static_assert(IMGUI_VERSION_NUM >= 19220,
-              "Dear ImGui >= 1.92.2 is required (PipelineInfoMain).");
+static_assert(IMGUI_VERSION_NUM >= 19240,
+              "Dear ImGui >= 1.92.4 is required (PipelineInfoMain).");
 
 ImGuiManager::ImGuiManager(
     GLFWwindow *window, uint32_t apiVersion, VkInstance instance,
@@ -22,13 +22,21 @@ ImGuiManager::ImGuiManager(
     uint32_t minImageCount, uint32_t imageCount, uint32_t textureSlots,
     std::function<void()> styleCallback, bool linearizeStyleColors,
     std::function<void()> fontCallback)
-    : styleCallback(std::move(styleCallback)),
+    : initWindow(window),
+      initApiVersion(apiVersion),
+      initInstance(instance),
+      initPhysicalDevice(physicalDevice),
+      initDevice(device),
+      initQueueFamily(queueFamily),
+      initQueue(queue),
+      initRenderPass(renderPass),
+      initPipelineCache(pipelineCache),
+      initMinImageCount(minImageCount),
+      initImageCount(imageCount),
+      initTextureSlots(textureSlots),
+      styleCallback(std::move(styleCallback)),
       fontCallback(std::move(fontCallback)),
       linearizeStyleColors(linearizeStyleColors) {
-  bool contextCreated = false;
-  bool glfwInited = false;
-  bool vulkanInited = false;
-
   try {
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
@@ -37,38 +45,60 @@ ImGuiManager::ImGuiManager(
     io.IniFilename = nullptr;  // Disable layout persistence (stateless UI)
 
 #ifdef IMGUI_HAS_DOCK
-    // Dear ImGui docking branch: enable docking + multi-viewport. Master-
-    // branch ImGui (no IMGUI_HAS_DOCK) skips this entire block.
-    //
-    // ViewportsEnable spawns OS-level windows for ImGui windows dragged out
-    // of the main viewport. The Vulkan + GLFW backends own all of that
-    // plumbing internally — the renderer only has to call
-    // ImGuiManager::renderPlatformWindows() each frame (handled by
-    // VulkanRenderer::drawFrame between submit and present).
+    // Dear ImGui docking branch: enable docking. Master-branch ImGui (no
+    // IMGUI_HAS_DOCK) skips this entire block.
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
-    io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
+    // ImGuiConfigFlags_ViewportsEnable (multi-viewport: real OS windows for
+    // ImGui windows dragged out of the main viewport) is deliberately left
+    // off. The vendored ImGui 1.92.9b Vulkan backend submits a layout
+    // transition on swap-chain images it has never acquired every time it
+    // creates or resizes one of its viewport swap chains
+    // (ImGui_ImplVulkanH_CreateOrResizeWindow, deps/ImGui/backends/
+    // imgui_impl_vulkan.cpp:1961-1987). The validation layer reports that as
+    // an error ("performs a layout transition on presentable VkImage ... but
+    // the image has not been acquired"), which aborts the process whenever
+    // VULKANWINDOW_VALIDATION_ABORT is set. Upstream: ocornut/imgui#9496.
+    //
+    // An app that wants multi-viewport back (e.g. after patching or upgrading
+    // the backend) must set the flag before finalizeInit() runs the backends —
+    // from its style callback, which finalizeInit() invokes first. ImGui's GLFW
+    // backend only advertises ImGuiBackendFlags_PlatformHasViewports if the
+    // flag is already set when ImGui_ImplGlfw_InitForVulkan() is called, so
+    // setting it after init is too late: the flag lands on the context but the
+    // viewport plumbing is never registered.
 #endif
 
     setupStyle();
+  } catch (...) {
+    if (contextCreated) ImGui::DestroyContext();
+    throw;
+  }
+}
 
+void ImGuiManager::initBackends() {
+  bool glfwInited = false;
+  bool vulkanInited = false;
+
+  try {
     // install_callbacks=true makes the ImGui backend chain its callbacks with
     // whatever was registered before, so Window::framebufferResizeCallback
     // (installed during Window construction) keeps firing. If ImGui init is
     // ever moved earlier than Window setup, that chaining order flips and
     // resize handling silently breaks.
-    if (!ImGui_ImplGlfw_InitForVulkan(window, true)) {
+    if (!ImGui_ImplGlfw_InitForVulkan(initWindow, true)) {
       throw std::runtime_error("Failed to initialize ImGui GLFW backend");
     }
     glfwInited = true;
 
     ImGui_ImplVulkan_InitInfo initInfo{};
-    initInfo.ApiVersion = apiVersion;
-    initInfo.Instance = instance;
-    initInfo.PhysicalDevice = physicalDevice;
-    initInfo.Device = device;
-    initInfo.QueueFamily = queueFamily;
-    initInfo.Queue = queue;
-    initInfo.PipelineCache = pipelineCache;
+    initInfo.ApiVersion = initApiVersion;
+    initInfo.Instance = initInstance;
+    initInfo.PhysicalDevice = initPhysicalDevice;
+    initInfo.Device = initDevice;
+    initInfo.QueueFamily = initQueueFamily;
+    initInfo.Queue = initQueue;
+    initInfo.PipelineCache = initPipelineCache;
     // Let the backend create and own a correctly-typed descriptor pool rather
     // than hand-rolling one. ImGui 1.92 split the texture descriptor from a
     // single COMBINED_IMAGE_SAMPLER into separate SAMPLED_IMAGE + SAMPLER
@@ -79,13 +109,13 @@ ImGuiManager::ImGuiManager(
     // backend's documented minimum so a small slot count can't trip its assert.
     initInfo.DescriptorPool = VK_NULL_HANDLE;
     initInfo.DescriptorPoolSize =
-        std::max(textureSlots + 1,
+        std::max(initTextureSlots + 1,
                  static_cast<uint32_t>(
                      IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE));
-    initInfo.PipelineInfoMain.RenderPass = renderPass;
+    initInfo.PipelineInfoMain.RenderPass = initRenderPass;
     initInfo.PipelineInfoMain.Subpass = 0;
-    initInfo.MinImageCount = minImageCount;
-    initInfo.ImageCount = imageCount;
+    initInfo.MinImageCount = initMinImageCount;
+    initInfo.ImageCount = initImageCount;
     initInfo.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 #ifdef IMGUI_HAS_DOCK
     // For secondary viewports (multi-viewport). Backend creates the swap-
@@ -104,27 +134,45 @@ ImGuiManager::ImGuiManager(
     // Load user fonts (if any). With Dear ImGui >= 1.92's dynamic atlas the
     // Vulkan backend uploads/refreshes the texture lazily each frame, so fonts
     // can be added here (or later via setFontCallback) with no explicit
-    // ImGui_ImplVulkan_CreateFontsTexture call. `this->` because the parameter
-    // of the same name was just moved into the member.
-    if (this->fontCallback) {
-      this->fontCallback();
+    // ImGui_ImplVulkan_CreateFontsTexture call.
+    if (fontCallback) {
+      fontCallback();
     }
   } catch (...) {
     // ImGui_ImplVulkan_Shutdown destroys the backend-owned descriptor pool, so
     // no separate pool teardown is needed on the failure path.
     if (vulkanInited) ImGui_ImplVulkan_Shutdown();
     if (glfwInited) ImGui_ImplGlfw_Shutdown();
-    if (contextCreated) ImGui::DestroyContext();
     throw;
   }
+
+  backendsInited = true;
+}
+
+void ImGuiManager::finalizeInit() {
+  if (backendsInited) return;
+
+  // Apply the style (and therefore any flag a style callback sets) *before* the
+  // backends are initialised. This is the whole point of splitting
+  // initialisation in two: the style callback is supplied by the app, which
+  // cannot run until Application's constructor has returned, so it must be
+  // applied here rather than during construction.
+  setupStyle();
+  initBackends();
 }
 
 ImGuiManager::~ImGuiManager() {
-  // ImGui_ImplVulkan_Shutdown also destroys the descriptor pool the backend
-  // created from DescriptorPoolSize.
-  ImGui_ImplVulkan_Shutdown();
-  ImGui_ImplGlfw_Shutdown();
-  ImGui::DestroyContext();
+  // Backends first (ImGui_ImplVulkan_Shutdown also destroys the descriptor pool
+  // the backend created), then the context. Guarded so a manager whose
+  // finalizeInit() never ran — or whose context creation threw — still tears
+  // down cleanly.
+  if (backendsInited) {
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+  }
+  if (contextCreated) {
+    ImGui::DestroyContext();
+  }
 }
 
 void ImGuiManager::newFrame() {
@@ -147,6 +195,11 @@ void ImGuiManager::renderPlatformWindows() {
     // callbacks installed by the Vulkan/GLFW backends. Each secondary viewport
     // submits and presents its own commands; we don't have to thread them
     // through our own queue.
+    // ViewportsEnable is off by default (see the constructor), so this is a
+    // no-op unless the app opted in. Do NOT enable that flag just to exercise
+    // this path: with the vendored ImGui 1.92.9b backend it emits a validation
+    // error on every viewport-window creation or resize
+    // (ocornut/imgui#9496).
     ImGui::UpdatePlatformWindows();
     ImGui::RenderPlatformWindowsDefault();
   }
@@ -154,6 +207,12 @@ void ImGuiManager::renderPlatformWindows() {
 }
 
 void ImGuiManager::setMinImageCount(uint32_t minImageCount) {
+  // WARNING: the ImGui Vulkan backend treats a *change* of this value as
+  // unsupported and fires IM_ASSERT(0) ("FIXME-VIEWPORT: Unsupported. Need to
+  // recreate all swap chains!", imgui_impl_vulkan.cpp). The renderer never
+  // calls this — a changed min image count rebuilds the ImGui context instead
+  // (see VulkanRenderer::recreateSwapChain). Only call it with the value the
+  // context was constructed with.
   ImGui_ImplVulkan_SetMinImageCount(minImageCount);
 }
 

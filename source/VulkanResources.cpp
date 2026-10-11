@@ -44,6 +44,16 @@ auto createMappedBuffer(VmaAllocator allocator, VkDeviceSize size,
                         VMA_ALLOCATION_CREATE_MAPPED_BIT);
 }
 
+void flushMapped(VmaAllocator allocator, const Buffer &buffer) {
+  if (buffer.allocation == VK_NULL_HANDLE) return;
+  // A no-op for coherent memory (vmaFlushAllocation only calls
+  // vkFlushMappedMemoryRanges when the allocation isn't HOST_COHERENT), but
+  // required on hardware/allocations where it isn't. offset is relative to the
+  // allocation, not the buffer, so 0 is correct for a whole buffer.
+  vkCheck(vmaFlushAllocation(allocator, buffer.allocation, 0, VK_WHOLE_SIZE),
+          "Failed to flush mapped buffer");
+}
+
 void destroyBuffer(VmaAllocator allocator, Buffer &buffer) {
   if (buffer.buffer != VK_NULL_HANDLE) {
     vmaDestroyBuffer(allocator, buffer.buffer, buffer.allocation);

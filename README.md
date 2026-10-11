@@ -39,11 +39,16 @@ int main() {
 }
 ```
 
+`UserInterface.h` is the library's own stateless demo UI (`source/UserInterface.h`)
+— it installs the demo dock space plus its main and info windows, the same UI the
+`VulkanWindowDemo` binary shows. Drop it and pass your own `setUICallback` to
+start from a bare window.
+
 ## Building from source
 
 ### Dependencies
 
-- [CMake](https://cmake.org/) ≥ 3.12
+- [CMake](https://cmake.org/) ≥ 3.18
 - [Vulkan SDK](https://www.vulkan.org/) (or system Vulkan headers + loader)
 - A C++20 compiler (GCC 10+, Clang 11+, MSVC 19.30+)
 
@@ -68,7 +73,8 @@ cmake --build build --config Release
 | `VULKANWINDOW_BUILD_DEMO` | `ON` if top-level, else `OFF` | Build the `VulkanWindowDemo` executable. |
 | `VULKANWINDOW_BUILD_EXAMPLES` | `ON` if top-level, else `OFF` | Build the example executables under `examples/`. Needs `glslc` (Vulkan SDK); skipped with a message if absent. |
 | `VULKANWINDOW_BEST_PRACTICES` | `OFF` | In Debug builds, enable `VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT`. |
-| `VULKANWINDOW_BUILD_TESTS` | `OFF` | Build the unit tests (`tests/`). Fetches doctest via `FetchContent`; needs CMake ≥ 3.14 and network access at configure. Run with `ctest --test-dir build`. |
+| `VULKANWINDOW_BUILD_TESTS` | `OFF` | Build the unit tests (`tests/`). Fetches doctest via `FetchContent`; needs CMake ≥ 3.18 (for `SOURCE_SUBDIR`) and network access at configure. Run with `ctest --test-dir build`. |
+| `VULKANWINDOW_INSTALL` | `OFF` | Emit install/export rules so consumers can `find_package(VulkanWindow)`. Requires `find_package(glfw3 CONFIG)` and `find_package(VulkanMemoryAllocator CONFIG)`; when `ON` the vendored submodules are not used. |
 
 ## Examples
 
@@ -139,10 +145,11 @@ vkutil::Buffer vbuf = vkutil::createDeviceLocalBuffer(
     VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
 
 // Host-visible, persistently-mapped buffer for CPU-written data (uniforms,
-// dynamic vertices). Write through `.mapped`.
+// dynamic vertices). Write through `.mapped`, then flush so the GPU sees it.
 vkutil::Buffer ubuf = vkutil::createMappedBuffer(
     ctx.allocator, sizeof(Ubo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 std::memcpy(ubuf.mapped, &ubo, sizeof(ubo));
+vkutil::flushMapped(ctx.allocator, ubuf);  // before the submit that reads it
 
 // ... use vbuf.buffer / ubuf.buffer in your draws ...
 
@@ -154,7 +161,10 @@ Also provides `beginSingleTimeCommands` / `endSingleTimeCommands` for your own
 one-shot GPU work (copies, layout transitions). `createDeviceLocalBuffer`
 blocks until the upload completes, so it's for load-time uploads, not the
 per-frame hot path — for per-frame data use a mapped buffer (one per
-`getFramesInFlight()` slot) and write it from `getCurrentFrameIndex()`.
+`getFramesInFlight()` slot) and write it from `getCurrentFrameIndex()`. Call
+`flushMapped` after each frame's writes, before submitting: it's a cheap no-op
+on the coherent memory most discrete GPUs hand out, but it's required for the
+mapped buffer to be correct on hardware that isn't coherent, so don't skip it.
 
 Textures come with the same one-call treatment — staged upload, layout
 transitions, optional mipmaps, and a view, all handled for you:
@@ -231,24 +241,27 @@ target_link_libraries(my_app PRIVATE VulkanWindow::VulkanWindow)
 ```
 
 Parent-provided `imgui` must include the Vulkan and GLFW backends and be Dear
-ImGui ≥ 1.92.2 (the renderer uses `PipelineInfoMain`, introduced in that
+ImGui ≥ 1.92.4 (the renderer uses `PipelineInfoMain`, introduced in that
 version).
 
 ## Application API
 
 | Method | Purpose |
 | --- | --- |
+| `run()` | Enter the frame loop; returns when the window closes (or after `VULKANWINDOW_MAX_FRAMES` frames). |
 | `setUICallback(fn)` | Invoked each frame between `ImGui::NewFrame()` and `ImGui::Render()` for app ImGui draws. |
 | `setRenderCallback(fn)` | Invoked inside the render pass, before ImGui, with the command buffer + swap-chain extent for app geometry. |
 | `setStyleCallback(fn)` | Replaces the built-in ImGui dark theme. Applied immediately. |
 | `setFontCallback(fn)` | Loads custom fonts into ImGui's atlas (`ImGui::GetIO().Fonts->AddFontFromFileTTF(...)`). Applied immediately and re-applied after an ImGui-context rebuild, so fonts persist. |
-| `setSwapchainRecreatedCallback(fn)` | Fired after a swap-chain rebuild (resize / present-mode / format change) with a `SwapchainRecreateInfo`. Device is idle; rebuild format-/extent-dependent resources here. |
+| `setSwapchainRecreatedCallback(fn)` | Fired after a swap-chain rebuild (resize / present-mode / format change) with a `SwapchainRecreateInfo`. Device is idle; rebuild format-/extent-dependent resources here. When `info.formatChanged` is true the ImGui context is rebuilt too, so ImGui texture handles (e.g. the `VkDescriptorSet` from `ImGui_ImplVulkan_AddTexture`) are destroyed with it and must be re-registered here. |
 | `setClearColor(r, g, b, a)` | RGBA colour cleared at frame start. Presented verbatim with the default `Unorm` surface (matches ImGui's colours); treated as linear and GPU-encoded with an `Srgb` surface. Default is opaque black. |
-| `setPresentMode(mode)` | Switch between `Vsync` / `Mailbox` / `Immediate` at runtime; triggers a swap-chain rebuild. |
+| `setPresentMode(mode)` | Switch between `Vsync` / `Mailbox` / `Immediate` at runtime; triggers a swap-chain rebuild on the next frame. No-op if the mode already matches, and the request may still fall back to FIFO if the surface doesn't support it. |
 | `setKeyCallback(fn)` | GLFW key events. ImGui's chained handlers continue to fire. |
 | `setCursorPosCallback(fn)` / `setMouseButtonCallback(fn)` / `setScrollCallback(fn)` / `setCharCallback(fn)` | Other input events. |
 | `getContext()` | Read-only `const VulkanContext &` — device, physical device, queues, VMA allocator, pipeline cache. |
 | `getSwapchain()` | Read-only `const Swapchain &` — render pass, extent, colour/depth formats, image views, framebuffers. |
+| `getWindow()` | Raw `GLFWwindow *`, valid for the app's lifetime — for GLFW calls that need the window (e.g. `glfwSetWindowShouldClose`, monitor queries). |
+| `getPresentMode()` | The preferred (requested) present mode. Note this is the request, not the mode the swap-chain actually got: `getSwapchain()` doesn't expose the resolved mode, and a request can silently fall back to FIFO. |
 | `getFramesInFlight()` | Frames queued ahead of the GPU; size per-frame resources by this. |
 | `getCurrentFrameIndex()` | In-flight slot being recorded; valid during `setRenderCallback`. Index per-frame resources with it. |
 
@@ -260,6 +273,30 @@ paths. If the app should ignore those, filter on
 The bundled `imgui` target compiles `imgui_stdlib` and puts it on the include
 path, so `#include "imgui_stdlib.h"` and `ImGui::InputText(label, &std::string)`
 work out of the box.
+
+ImGui docking is on, but **multi-viewport is off by default**: a window dragged
+out of the main viewport docks to an edge instead of detaching into its own OS
+window. The vendored ImGui Vulkan backend emits a validation error on that path
+([ocornut/imgui#9496](https://github.com/ocornut/imgui/issues/9496)), which
+aborts the process whenever `VULKANWINDOW_VALIDATION_ABORT` is set.
+
+To opt in once the backend is patched or upgraded, set the flag from a style
+callback — the style is applied before the ImGui backends are initialised (see
+"Application API"):
+
+```cpp
+Application app;
+app.setStyleCallback([] {
+  ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+});
+```
+
+Two caveats. ImGui's GLFW backend disables multi-viewport on **Wayland**
+(`glfwGetPlatform() == GLFW_PLATFORM_WAYLAND` forces
+`ImGuiBackendFlags_PlatformHasViewports` off), so the opt-in only takes effect
+on X11 and Windows — on Wayland the flag is set but no viewport plumbing is
+registered. And until ImGui #9496 is fixed, opting in reintroduces the
+validation error above.
 
 ### Surface format and ImGui colours
 
@@ -355,7 +392,13 @@ Application
   framebuffers, command pool/buffers, sync primitives, and `ImGuiManager`.
   Handles resize via `recreateSwapChain()`.
 - **`ImGuiManager`** is the only translation unit that touches
-  `imgui_impl_*`.
+  `imgui_impl_*`. ImGui docking is enabled; ImGui *multi-viewport* (detaching a
+  window into its own OS window) is off by default because the vendored ImGui
+  Vulkan backend emits a validation error on that path
+  ([ocornut/imgui#9496](https://github.com/ocornut/imgui/issues/9496)). It is
+  re-enabled by setting `ImGuiConfigFlags_ViewportsEnable` from a style
+  callback — see "Application API" for the ordering rules and the Wayland
+  caveat.
 
 ## CI
 
@@ -364,8 +407,9 @@ GitHub Actions builds Release configurations on `windows-latest`,
 is what compiles the `VK_KHR_portability_*` paths) and runs `clang-format`
 (pinned to `clang-format-18`, `--Werror`), `clang-tidy` (with
 `-warnings-as-errors='*'`), and the **unit tests** (`ctest`) on Linux. Binaries
-are uploaded as workflow artifacts on every push; a GitHub Release is published
-only when a `v*` tag is pushed.
+are uploaded as workflow artifacts on every run — the workflow triggers on
+pushes to `main` and `v*` tags, plus pull requests touching the source tree; a
+GitHub Release is published only when a `v*` tag is pushed.
 
 The unit tests (`tests/`, [doctest](https://github.com/doctest/doctest)) cover
 the library's pure logic — surface-format / present-mode / extent selection,
@@ -390,5 +434,4 @@ that compile and lint cleanly. The release job is gated on both.
 | --- | --- |
 | `VULKANWINDOW_MAX_FRAMES` | Render this many frames then exit cleanly (0 status). Unset / `0` runs until the window is closed. |
 | `VULKANWINDOW_VALIDATION_ABORT` | When set (non-empty, non-`0`), abort the process with a non-zero status on any validation **error** or sync-validation hazard. Debug builds only — validation isn't compiled into Release. Warnings (incl. best-practices) never abort. |
-| `VULKANWINDOW_DEVICE_INDEX` | Force a physical-device enumeration index instead of auto-scoring (testing / multi-GPU). |
-| `VULKANWINDOW_BEST_PRACTICES` (CMake option) | Compile in best-practices validation in Debug builds. Off by default. |
+| `VULKANWINDOW_DEVICE_INDEX` | Force a physical-device enumeration index instead of auto-scoring (testing / multi-GPU). Honoured only when the index is in range and that device is suitable: negative, non-numeric, or out-of-range values silently fall back to auto-scoring, while an in-range index whose device is unsuitable fails device creation with `Failed to find a suitable GPU`. |

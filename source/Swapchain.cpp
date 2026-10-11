@@ -2,6 +2,7 @@
 
 #include <vk_mem_alloc.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iostream>
@@ -26,8 +27,31 @@ auto chooseSwapExtent(const VkSurfaceCapabilitiesKHR &capabilities,
   int width = 0;
   int height = 0;
   glfwGetFramebufferSize(window, &width, &height);
-  return vkutil::clampSwapExtent(capabilities, static_cast<uint32_t>(width),
-                                 static_cast<uint32_t>(height));
+  VkExtent2D extent = vkutil::clampSwapExtent(
+      capabilities, width > 0 ? static_cast<uint32_t>(width) : 0u,
+      height > 0 ? static_cast<uint32_t>(height) : 0u);
+  // A minimized window reports a 0×0 framebuffer, and on Win32 the surface
+  // then reports currentExtent = minImageExtent = maxImageExtent = 0×0 as well
+  // (measured on AMD 1.4.349), so clampSwapExtent hands back a zero extent.
+  // A zero/short extent is only repairable when the surface still exposes
+  // usable bounds: prefer minImageExtent, and use 1×1 when the minimum itself
+  // is zero. If maxImageExtent is zero the bounds are degenerate and no legal
+  // extent exists (vkCreateSwapchainKHR would violate
+  // VUID-VkSwapchainCreateInfoKHR-imageExtent-01689 for a zero extent, and
+  // VUID-VkSwapchainCreateInfoKHR-pNext-07781 for anything outside
+  // [minImageExtent, maxImageExtent]) — leave it zero so createSwapchain()
+  // reports that instead of handing the driver an invalid extent.
+  if (extent.width == 0) {
+    extent.width = capabilities.maxImageExtent.width == 0
+                       ? 0u
+                       : std::max(capabilities.minImageExtent.width, 1u);
+  }
+  if (extent.height == 0) {
+    extent.height = capabilities.maxImageExtent.height == 0
+                        ? 0u
+                        : std::max(capabilities.minImageExtent.height, 1u);
+  }
+  return extent;
 }
 
 }  // namespace
@@ -107,6 +131,18 @@ void Swapchain::createSwapchain(PresentMode preferred) {
   VkPresentModeKHR presentMode =
       vkutil::chooseSwapPresentMode(support.presentModes, preferred);
   VkExtent2D chosenExtent = chooseSwapExtent(support.capabilities, window);
+  if (chosenExtent.width == 0 || chosenExtent.height == 0) {
+    // No legal extent exists while the window has no drawable area (Win32
+    // reports degenerate surface bounds for a minimized window). Failing with
+    // an actionable message beats handing vkCreateSwapchainKHR an extent that
+    // violates the spec — some drivers accept it silently. This affects the
+    // *initial* creation only: recreateSwapChain() already defers while the
+    // framebuffer is 0×0, so minimizing at runtime is handled.
+    throw std::runtime_error(
+        "Cannot create a swap chain: the window has no drawable area "
+        "(framebuffer is 0×0 and the surface reports degenerate bounds). "
+        "Restore/un-minimize the window before creating the renderer.");
+  }
 
   // chooseSwapPresentMode is pure (no logging); report a fallback here. Warn
   // once per process — createSwapchain runs on every resize, so warning each
@@ -166,9 +202,13 @@ void Swapchain::createSwapchain(PresentMode preferred) {
              VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR) {
     createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR;
   } else {
-    // Last resort: grab any supported bit.
+    // Last resort: pick a single supported bit. compositeAlpha is a
+    // *FlagBits value — exactly one bit — so passing the raw multi-bit mask
+    // through would be an invalid enum value.
+    const VkCompositeAlphaFlagsKHR supported =
+        support.capabilities.supportedCompositeAlpha;
     createInfo.compositeAlpha = static_cast<VkCompositeAlphaFlagBitsKHR>(
-        support.capabilities.supportedCompositeAlpha);
+        supported & (~supported + 1u));  // lowest set bit
   }
 
   createInfo.presentMode = presentMode;
@@ -179,18 +219,32 @@ void Swapchain::createSwapchain(PresentMode preferred) {
   VkSwapchainKHR oldSwapchain = swapChain;
   createInfo.oldSwapchain = oldSwapchain;
 
-  if (vkCreateSwapchainKHR(ctx.device, &createInfo, nullptr, &swapChain) !=
+  // Create into a local: per spec the contents of an output parameter are
+  // undefined when a command fails, so writing straight into `swapChain`
+  // could leave the member holding a garbage handle — and lose the still-valid
+  // old swap chain, which cleanup() would then leak. The old handle is only
+  // retired, and destroyed, after a successful create.
+  VkSwapchainKHR newSwapchain = VK_NULL_HANDLE;
+  if (vkCreateSwapchainKHR(ctx.device, &createInfo, nullptr, &newSwapchain) !=
       VK_SUCCESS) {
     throw std::runtime_error("Failed to create swap chain");
   }
+  swapChain = newSwapchain;
 
   if (oldSwapchain != VK_NULL_HANDLE) {
     vkDestroySwapchainKHR(ctx.device, oldSwapchain, nullptr);
   }
 
-  vkGetSwapchainImagesKHR(ctx.device, swapChain, &imageCount, nullptr);
+  // A failed (or partial) query must not leave stale handles in `images` for
+  // createImageViews() to feed to vkCreateImageView. VK_INCOMPLETE — the
+  // count grew between the two calls — is surfaced as an error too, since a
+  // truncated image list is not something we can render with.
+  vkCheck(vkGetSwapchainImagesKHR(ctx.device, swapChain, &imageCount, nullptr),
+          "Failed to query swap chain image count");
   images.resize(imageCount);
-  vkGetSwapchainImagesKHR(ctx.device, swapChain, &imageCount, images.data());
+  vkCheck(vkGetSwapchainImagesKHR(ctx.device, swapChain, &imageCount,
+                                  images.data()),
+          "Failed to get swap chain images");
 
   imageFormat = surfaceFormat.format;
   extent = chosenExtent;

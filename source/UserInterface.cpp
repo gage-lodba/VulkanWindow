@@ -81,15 +81,16 @@ void UserInterface::renderMainWindow() {
 
 void UserInterface::renderInfoWindow() {
   // A second window so the docking workflow has something to compose. Users
-  // can drag this window into the main one to dock them side-by-side, or
-  // (with multi-viewport on) drag it out of the main OS window entirely.
+  // can drag this window into the main one to dock them side-by-side, or —
+  // with multi-viewport opted in — drag it out of the main OS window.
   ImGui::SetNextWindowSize({320.0f, 220.0f}, ImGuiCond_FirstUseEver);
   ImGui::Begin("Info", nullptr, ImGuiWindowFlags_NoCollapse);
 
   ImGui::TextWrapped(
       "This window is dockable. Drag its title bar onto another window's "
-      "tab strip or edge to dock; drag it out of the main viewport to "
-      "detach it as its own OS window (requires the ImGui docking branch).");
+      "tab strip or edge to dock. Detaching it into its own OS window needs "
+      "ImGui multi-viewport, which is off by default here (upstream ImGui "
+      "Vulkan-backend validation bug; see ImGuiManager).");
 
   ImGui::Separator();
 
@@ -103,9 +104,10 @@ void UserInterface::renderInfoWindow() {
   ImGui::Text("Docking: not available (master-branch ImGui)");
 #endif
 #ifdef IMGUI_HAS_DOCK
-  ImGui::Text(
-      "Viewports: %s",
-      (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable) ? "enabled" : "off");
+  ImGui::Text("Viewports: %s",
+              (io.ConfigFlags & ImGuiConfigFlags_ViewportsEnable)
+                  ? "enabled"
+                  : "off (multi-viewport disabled by default)");
 #else
   ImGui::Text("Viewports: not available");
 #endif
