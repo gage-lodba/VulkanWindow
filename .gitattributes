@@ -1,0 +1,14 @@
+# Shell scripts must keep LF endings no matter how they are checked out.
+#
+# The Windows CI job runs .github/scripts/*.sh through Git Bash's `sh`, and the
+# linux/macos jobs run them through bash. A CRLF shebang line ("bash\r") fails
+# with "bad interpreter", and a stray CR inside a parsed value is a silent
+# wrong-answer bug rather than a loud one. Declaring it here keeps the scripts
+# byte-identical across the three runners instead of relying on each developer's
+# core.autocrlf.
+*.sh text eol=lf
+
+# The workflow and scripts are YAML/shell; keep them LF too so diffs stay
+# readable and nothing downstream has to cope with mixed endings.
+*.yml  text eol=lf
+*.yaml text eol=lf

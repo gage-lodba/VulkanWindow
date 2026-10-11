@@ -13,11 +13,19 @@ on:
   pull_request:
     paths:
       - '.github/workflows/**'
+      # The extracted CI scripts: a PR that only edits one of these must still
+      # run the job that executes it.
+      - '.github/scripts/**'
       - 'source/**'
       - 'examples/**'
       - 'tests/**'
       - 'cmake/**'
       - 'CMakeLists.txt'
+
+# Least privilege: every job here only reads the repository. The release job
+# overrides this with contents: write, which it needs to publish assets.
+permissions:
+  contents: read
 
 concurrency:
   # Cancel superseded runs on the same ref. Distinct refs get distinct groups,
@@ -28,6 +36,9 @@ concurrency:
 jobs:
   windows:
     runs-on: windows-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # Installing the Vulkan SDK on a cold cache dominates this job.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v5
@@ -70,24 +81,12 @@ jobs:
         # silently return()'d — fail rather than let a no-examples build pass
         # green, exactly as the linux and macos jobs do.
         #
-        # Visual Studio is the default generator on this runner and it is a
-        # multi-configuration one: the per-config subdirectory is appended to
-        # each target's own binary directory, so a target defined in
-        # examples/<name>/ lands in build/examples/<name>/Release/. The root
-        # target follows the same rule — hence the artifact step below
-        # uploading build/Release/VulkanWindow.exe.
+        # The check lives in .github/scripts/ so it is testable outside CI; the
+        # windows variant knows this runner's layout (Visual Studio is the
+        # default generator here and it is multi-configuration, so CMake appends
+        # Release to each target's own binary directory).
         shell: pwsh
-        run: |
-          $bins = @(
-            'build/examples/triangle/Release/VulkanWindowTriangle.exe',
-            'build/examples/textured_quad/Release/VulkanWindowTexturedQuad.exe'
-          )
-          foreach ($bin in $bins) {
-            if (-not (Test-Path -PathType Leaf $bin)) {
-              echo "::error::expected example binary missing: $bin (glslc not found at configure?)"
-              exit 1
-            }
-          }
+        run: sh .github/scripts/verify-examples-built-windows.sh build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -97,6 +96,9 @@ jobs:
 
   linux:
     runs-on: ubuntu-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # apt + ccache restore + full build, tests, format and tidy.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v5
@@ -112,13 +114,15 @@ jobs:
         # (GLFW's recommended metapackage: Xrandr, Xinerama, Xcursor, Xi, Xext,
         # …). Wayland needs wayland-scanner (libwayland-bin), libwayland-dev, and
         # wayland-protocols. libxkbcommon-dev is used by both backends and isn't
-        # part of xorg-dev, so it stays explicit.
+        # part of xorg-dev, so it stays explicit. shellcheck is for the CI
+        # scripts under .github/scripts/ (see the shellcheck step below).
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev \
             mesa-vulkan-drivers glslc \
             xorg-dev libxkbcommon-dev \
-            libwayland-dev libwayland-bin wayland-protocols clang-tidy clang-format-18
+            libwayland-dev libwayland-bin wayland-protocols clang-tidy clang-format-18 \
+            shellcheck
 
       - name: Check formatting
         # clang-format is pinned to one major version on purpose: its output
@@ -133,6 +137,16 @@ jobs:
             source/*.cpp source/*.h \
             examples/*/*.cpp \
             tests/*.cpp tests/*.h
+
+      - name: Shellcheck the CI scripts
+        # The scripts in .github/scripts/ carry the guards that decide whether
+        # the test suite and the examples actually ran, so a silent bug in one is
+        # worse than a compile error — it reports success. shellcheck is the
+        # static check for that, and it is only possible because this logic no
+        # longer lives inline in the YAML.
+        run: |
+          shellcheck --version
+          shellcheck -S warning .github/scripts/*.sh
 
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2.23
@@ -161,25 +175,21 @@ jobs:
         # marker actually appeared — otherwise a packaging regression could
         # hide the GPU tests behind a green ctest.
         #
-        # `set -euo pipefail` is load-bearing: without pipefail the pipeline's
-        # status is tee's (always 0), so a red — or aborted — ctest would still
-        # leave the job green.
+        # Two separate failures to catch here:
         #
-        # The "context ready" marker only proves the fixture was constructed
-        # once, so assert how many test cases actually ran as well: dropping a
-        # whole TU from tests/CMakeLists.txt (or #if-ing one out) would
-        # otherwise keep CI green with tests silently gone.
+        # 1. The pipeline. `set -o pipefail` is load-bearing: without it the
+        #    pipeline's status is tee's (always 0), so a red — or aborted —
+        #    ctest would still leave the job green.
+        # 2. The tests actually running. The "context ready" marker proves the
+        #    GPU fixture was constructed once; the doctest counts prove the
+        #    suite is intact. Both live in .github/scripts/doctest-summary.sh so
+        #    they can be exercised against synthetic logs outside CI.
         #
-        # This is a FLOOR, not an exact count, on purpose. Pinning the exact
-        # number makes every honest test addition a red build, and a guard that
-        # cries wolf gets its number rubber-stamped — which is how test-loss
-        # detection quietly stops working. Raising the floor when you add tests
-        # is encouraged; lowering it means tests were deliberately deleted and
-        # should be justified in the commit.
+        # MIN_TEST_CASES is a floor, not an exact count: pinning the exact number
+        # makes every honest test addition a red build, and a guard that cries
+        # wolf gets rubber-stamped. Raise it when you add tests.
         run: |
           set -euo pipefail
-
-          MIN_TEST_CASES=55
 
           LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
           if [ -z "$LVP" ]; then
@@ -191,51 +201,13 @@ jobs:
           grep -q "VulkanTestFixture: context ready" ctest.log \
             || { echo "::error::GPU-resource tests did not run (fixture skipped)"; exit 1; }
 
-          # doctest right-aligns each count into a fixed-width column and colours
-          # it when it thinks it is on a terminal, so normalise the log before
-          # parsing instead of depending on the exact spacing.
-          summary="$(sed -e 's/\x1b\[[0-9;]*m//g' -e 's/  */ /g' ctest.log \
-            | grep -m1 'test cases:' || true)"
-          if [ -z "$summary" ]; then
-            echo "::error::no doctest summary line in ctest.log — did the test binary run?"
-            exit 1
-          fi
-          echo "doctest summary: $summary"
-
-          # Pull the "N passed" and "N failed" fields out of the summary line.
-          # awk with a whitespace-and-pipe field split avoids relying on grep's
-          # handling of a space-quantifier, which is not portable across grep
-          # builds. Both counts are read: the floor alone is satisfied by a run
-          # that has failures (59 cases, 55 passed, 4 failed still clears it).
-          counts="$(printf '%s\n' "$summary" \
-            | awk -F'[ |]+' '/test cases:/ { p=""; f=""; for (i = 1; i <= NF; i++) { if ($i == "passed") p = $(i - 1); if ($i == "failed") f = $(i - 1) } print p, f; exit }')"
-          passed="${counts%% *}"
-          failed="${counts##* }"
-          if [ -z "$passed" ] || [ -z "$failed" ]; then
-            echo "::error::could not parse the pass/fail counts out of: $summary"
-            echo "::error::every case must pass — a failure or skip changes this line's shape"
-            exit 1
-          fi
-          if [ "$failed" -ne 0 ]; then
-            echo "::error::doctest reported $failed failing test case(s)"
-            exit 1
-          fi
-          if [ "$passed" -lt "$MIN_TEST_CASES" ]; then
-            echo "::error::only $passed test cases passed, expected at least $MIN_TEST_CASES"
-            echo "::error::a whole test TU may have been dropped from tests/CMakeLists.txt"
-            echo "::error::if tests were intentionally removed, lower MIN_TEST_CASES in this step"
-            exit 1
-          fi
+          bash .github/scripts/doctest-summary.sh ctest.log 55
 
       - name: Verify examples built
         # glslc is installed, so the example targets MUST exist. If they don't,
         # vulkanwindow_add_shaders()'s guard silently return()'d — fail rather
         # than let a no-examples build pass green.
-        run: |
-          for b in build/examples/triangle/VulkanWindowTriangle \
-                   build/examples/textured_quad/VulkanWindowTexturedQuad; do
-            test -x "$b" || { echo "::error::expected example binary missing: $b"; exit 1; }
-          done
+        run: bash .github/scripts/verify-examples-built.sh build
 
       - name: Run clang-tidy
         # Lint our sources only — skip deps/ headers. -quiet keeps the log
@@ -257,6 +229,9 @@ jobs:
   smoke:
     name: Smoke test (lavapipe + validation)
     runs-on: ubuntu-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # Debug build plus 120 frames x 3 binaries under lavapipe.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v5
@@ -343,6 +318,9 @@ jobs:
   macos:
     name: Build (macOS / MoltenVK)
     runs-on: macos-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # brew update/install dominates this job.
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v5
@@ -377,11 +355,7 @@ jobs:
         # glslc (from shaderc) is installed, so the example targets MUST exist —
         # same guard as the linux job; a silent return() from the shader helper
         # should fail rather than pass green.
-        run: |
-          for b in build/examples/triangle/VulkanWindowTriangle \
-                   build/examples/textured_quad/VulkanWindowTexturedQuad; do
-            test -x "$b" || { echo "::error::expected example binary missing: $b"; exit 1; }
-          done
+        run: bash .github/scripts/verify-examples-built.sh build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -392,6 +366,9 @@ jobs:
   macos-smoke:
     name: Smoke test (MoltenVK + validation)
     runs-on: macos-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # brew update/install plus 120 frames x 3 under MoltenVK.
+    timeout-minutes: 40
 
     steps:
       - uses: actions/checkout@v5
@@ -499,6 +476,9 @@ jobs:
     # main. Pull-request builds also skip this job.
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    # Guards against a hang burning the 6-hour default. Generous:
+    # Artifact download, asset staging and upload.
+    timeout-minutes: 15
     needs: [windows, linux, smoke, macos, macos-smoke]
     permissions:
       contents: write
@@ -509,29 +489,20 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
 
-      - name: Rename the macOS binary for publishing
-        # action-gh-release names each asset after its file's basename, so
-        # listing "macos-latest/VulkanWindow" beside "ubuntu-latest/VulkanWindow"
-        # would publish two assets both called "VulkanWindow". The action globs
-        # the list and uploads the files in parallel, deleting any existing
-        # asset of the same name first — so one platform's binary would
-        # silently replace the other. Rename the macOS copy instead, keeping
-        # it under its artifact directory like the other two entries.
-        run: |
-          test -f macos-latest/VulkanWindow \
-            || { echo "::error::macos-latest/VulkanWindow missing — did the macOS job upload its artifact?"; exit 1; }
-          mv macos-latest/VulkanWindow macos-latest/VulkanWindow-macos
-
-      - name: Make the Unix binaries executable
-        # actions/upload-artifact normalises permissions, so the Linux and macOS
-        # artifacts come back as 644 — a published asset that can't be executed
-        # without a manual chmod. Restore the bit before publishing. (The
-        # Windows asset is a .exe and needs nothing.)
-        run: |
-          for b in ubuntu-latest/VulkanWindow macos-latest/VulkanWindow-macos; do
-            test -f "$b" || { echo "::error::expected release asset missing: $b"; exit 1; }
-            chmod +x "$b"
-          done
+      - name: Stage release assets
+        # Two jobs on the downloaded artifacts, both in
+        # .github/scripts/stage-release-assets.sh so they are testable outside
+        # CI:
+        #
+        # 1. Rename the macOS binary. action-gh-release names each asset after
+        #    its file's basename, so listing "macos-latest/VulkanWindow" beside
+        #    "ubuntu-latest/VulkanWindow" would publish two assets both called
+        #    "VulkanWindow"; the action globs the list and uploads in parallel,
+        #    deleting any existing same-named asset first, so one platform's
+        #    binary would silently replace the other.
+        # 2. Restore the execute bit that actions/upload-artifact normalises
+        #    away, which otherwise publishes 0644 binaries.
+        run: bash .github/scripts/stage-release-assets.sh .
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
