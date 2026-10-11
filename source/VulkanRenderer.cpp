@@ -135,9 +135,11 @@ void VulkanRenderer::recreateImageAvailableSemaphores() {
 
 void VulkanRenderer::createImGui() {
   // Pass the user's style + font callbacks into the constructor so they're
-  // applied during init rather than after — and so they're re-applied if this
-  // runs again on a swap-chain rebuild (format/image-count change recreates the
-  // ImGui context, which would otherwise drop custom fonts and theme).
+  // re-applied if this runs again on a swap-chain rebuild (format/image-count
+  // change recreates the ImGui context, which would otherwise drop custom fonts
+  // and theme). Note the constructor does NOT initialise the ImGui backends —
+  // that is deferred to finalizeInit(), which Application::run() calls once the
+  // app has had a chance to register its callbacks.
   //
   // On an sRGB swap-chain ImGui's sRGB-authored colours would wash out, so tell
   // the manager to linearise the built-in theme to match the format.
@@ -148,7 +150,15 @@ void VulkanRenderer::createImGui() {
       context->physicalDevice, context->device, context->graphicsQueueFamily,
       context->graphicsQueue, swapchain->renderPass, context->pipelineCache,
       swapchain->minImageCount, static_cast<uint32_t>(swapchain->images.size()),
-      100, styleCallback, linearizeStyleColors, fontCallback);
+      /*textureSlots=*/100u, styleCallback, linearizeStyleColors, fontCallback);
+}
+
+void VulkanRenderer::finalizeInit() {
+  // The ImGui context exists by now (createImGui() built it), but its backends
+  // deliberately have not been initialised — see ImGuiManager::finalizeInit().
+  if (imguiManager) {
+    imguiManager->finalizeInit();
+  }
 }
 
 void VulkanRenderer::setPresentMode(PresentMode mode) {
@@ -203,8 +213,12 @@ auto VulkanRenderer::getSwapchain() const noexcept -> const Swapchain & {
 void VulkanRenderer::drawFrame() {
   // Application::run() already gates on a 0×0 framebuffer and blocks on
   // waitEvents while minimized, so we don't re-check here.
-  vkWaitForFences(context->device, 1, &inFlightFences[currentFrame], VK_TRUE,
-                  UINT64_MAX);
+  // A failed wait (e.g. VK_ERROR_DEVICE_LOST) must not be ignored: the fence
+  // would otherwise never signal and the next UINT64_MAX wait would hang
+  // instead of surfacing the error.
+  vkCheck(vkWaitForFences(context->device, 1, &inFlightFences[currentFrame],
+                          VK_TRUE, UINT64_MAX),
+          "Failed to wait for in-flight fence");
 
   uint32_t imageIndex = 0;
   VkResult result = vkAcquireNextImageKHR(
@@ -312,7 +326,10 @@ void VulkanRenderer::drawFrame() {
   // window in which the fence is unsignaled is minimal. If submit fails the
   // fence stays unsignaled, but we throw on that path and the application
   // terminates without ever waiting on it again.
-  vkResetFences(context->device, 1, &inFlightFences[currentFrame]);
+  // Same reasoning as the fence wait above: a failed reset would leave the
+  // fence armed and the next submit's fence signal undefined.
+  vkCheck(vkResetFences(context->device, 1, &inFlightFences[currentFrame]),
+          "Failed to reset in-flight fence");
 
   // The exception propagates out of run() and the application terminates,
   // so there's no point trying to rebuild sync objects for a frame that
@@ -323,7 +340,9 @@ void VulkanRenderer::drawFrame() {
 
   // Multi-viewport: spawn/update/render secondary platform windows. Each
   // viewport's swap-chain and submit/present is handled internally by the
-  // ImGui Vulkan backend. No-op when the docking branch isn't in use.
+  // ImGui Vulkan backend. No-op unless the docking branch is in use AND the
+  // app opted into ImGuiConfigFlags_ViewportsEnable — off by default, see
+  // ImGuiManager and ocornut/imgui#9496.
   imguiManager->renderPlatformWindows();
 
   VkPresentInfoKHR presentInfo{};
@@ -390,12 +409,15 @@ void VulkanRenderer::recreateSwapChain() {
   const Swapchain::RecreateResult res =
       swapchain->recreate(preferredPresentMode);
 
-  // ImGui's Vulkan backend pins the render pass and ImageCount at init. It
-  // only needs a teardown + rebuild when the format (→ new render pass) or
-  // image count changed; pure extent changes are fine. The old render pass
-  // (if any) is held by `res.oldRenderPassToDestroy` for us to destroy after
-  // ImGui has been torn down.
-  const bool needFullImGuiRebuild = res.formatChanged || res.imageCountChanged;
+  // ImGui's Vulkan backend pins the render pass, ImageCount and MinImageCount
+  // at init, and it treats a *changed* MinImageCount as unsupported
+  // (ImGui_ImplVulkan_SetMinImageCount fires IM_ASSERT(0) in the backend). So
+  // any of the three changing means teardown + rebuild; pure extent changes
+  // are fine. The old render pass (if any) is held by
+  // `res.oldRenderPassToDestroy` for us to destroy after ImGui is torn down.
+  const bool needFullImGuiRebuild =
+      res.formatChanged || res.imageCountChanged ||
+      swapchain->minImageCount != oldMinImageCount;
 
   if (needFullImGuiRebuild) {
     imguiManager.reset();
@@ -407,8 +429,6 @@ void VulkanRenderer::recreateSwapChain() {
 
   if (needFullImGuiRebuild) {
     createImGui();
-  } else if (swapchain->minImageCount != oldMinImageCount && imguiManager) {
-    imguiManager->setMinImageCount(swapchain->minImageCount);
   }
 
   // Recreate per-image render-finished semaphores for the new swap chain
