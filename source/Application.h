@@ -55,7 +55,11 @@ class Application {
       std::function<void(VkCommandBuffer, VkExtent2D)> callback);
 
   /// Set a callback to customise the ImGui style/theme.
-  /// Replaces the built-in dark theme. Applied immediately.
+  /// Replaces the built-in dark theme. Applied immediately, and again before
+  /// the ImGui backends are initialised (at the start of run()), so a callback
+  /// set here can also influence backend setup — e.g. setting
+  /// `ImGuiConfigFlags_ViewportsEnable` to opt into multi-viewport. Setting it
+  /// after run() has started only affects the theme from then on.
   /// Must be called from the thread that constructed Application; not safe to
   /// invoke concurrently with run().
   void setStyleCallback(std::function<void()> callback);
@@ -75,6 +79,10 @@ class Application {
   /// resources that depend on the render pass, formats, or extent; the
   /// `SwapchainRecreateInfo` argument flags whether the format / image count
   /// changed and carries the new extent. The device is idle when it fires.
+  /// When `formatChanged` is true the ImGui context is rebuilt too, so ImGui
+  /// texture handles (e.g. the VkDescriptorSet from
+  /// ImGui_ImplVulkan_AddTexture) are destroyed with it and must be
+  /// re-registered here.
   /// Not called for the initial swap-chain — create those resources up front
   /// (see getContext() / getSwapchain()). Include "VulkanRenderer.h" for the
   /// SwapchainRecreateInfo definition.
