@@ -135,10 +135,13 @@ set(lib_sources
   source/Application.h
   source/ImGuiManager.cpp
   source/ImGuiManager.h
+  source/PipelineCacheStore.cpp
+  source/PipelineCacheStore.h
   source/VulkanDescriptors.cpp
   source/VulkanDescriptors.h
   source/Swapchain.cpp
   source/Swapchain.h
+  source/SwapchainRecreateInfo.h
   source/UserInterface.cpp
   source/UserInterface.h
   source/VulkanContext.cpp
@@ -284,16 +287,36 @@ if(VULKANWINDOW_INSTALL)
   endif()
 
   # Public headers — only the .h files from source/. .cpp files don't ship.
-  install(DIRECTORY source/
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VulkanWindow
-    FILES_MATCHING PATTERN "*.h")
+  # Explicitly listed rather than globbed via
+  # `install(DIRECTORY source/ ... FILES_MATCHING PATTERN "*.h")`, which would
+  # also publish internals. Note PipelineCacheStore.h is included by
+  # VulkanContext.h, so it is part of the public surface even though consumers
+  # rarely name it directly.
+  install(FILES
+    source/Application.h
+    source/PipelineCacheStore.h
+    source/RendererTypes.h
+    source/Swapchain.h
+    source/SwapchainRecreateInfo.h
+    source/UserInterface.h
+    source/VulkanContext.h
+    source/VulkanDescriptors.h
+    source/VulkanResources.h
+    source/VulkanSelectors.h
+    source/VulkanUtils.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VulkanWindow)
 
-  # Dear ImGui headers (matching the INSTALL_INTERFACE paths above).
+  # Dear ImGui headers (matching the INSTALL_INTERFACE paths above). The
+  # examples/ exclusion matters: deps/ImGui/examples/ carries its own bundled
+  # copies of glfw3.h, uSynergy.h and friends, which are header-only demo
+  # scaffolding with no relation to this library. Without the exclusion they
+  # ship and, worse, put a second GLFW header inside an installed prefix.
   install(DIRECTORY deps/ImGui/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VulkanWindow/imgui
     FILES_MATCHING
       PATTERN "*.h"
-      PATTERN "backends/*.h")
+      PATTERN "backends/*.h"
+      PATTERN "examples" EXCLUDE)
 
   # Export the targets into a file the consumer will include.
   install(EXPORT VulkanWindowTargets
