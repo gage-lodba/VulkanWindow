@@ -362,7 +362,7 @@ after each rebuild (not for the initial swap-chain), with the device idle, so
 it's the safe place to destroy and recreate format-dependent pipelines:
 
 ```cpp
-#include "VulkanRenderer.h"  // SwapchainRecreateInfo
+#include "SwapchainRecreateInfo.h"
 
 app.setSwapchainRecreatedCallback([&](const SwapchainRecreateInfo &info) {
   if (info.formatChanged) {
@@ -387,7 +387,11 @@ Application
 - **`VulkanContext`** owns long-lived Vulkan state that doesn't depend on the
   swap-chain. Survives swap-chain rebuilds. Pipeline cache is persisted across
   runs to a per-user cache directory, namespaced by the window title so apps
-  built on the library don't share one cache file.
+  built on the library don't share one cache file. The persistence itself lives
+  in `vkutil::PipelineCacheStore` (`PipelineCacheStore.h`) — path derivation,
+  the cache-header device check, and the crash-safe temp-then-rename write —
+  which is deliberately free of Vulkan handles so it can be unit-tested without
+  a GPU. `VulkanContext` keeps only the two `vk*PipelineCache` calls around it.
 - **`VulkanRenderer`** owns the swap-chain, depth attachment, render pass,
   framebuffers, command pool/buffers, sync primitives, and `ImGuiManager`.
   Handles resize via `recreateSwapChain()`.
@@ -414,12 +418,14 @@ GitHub Release is published only when a `v*` tag is pushed.
 The unit tests (`tests/`, [doctest](https://github.com/doctest/doctest)) cover
 the library's pure logic — surface-format / present-mode / extent selection,
 cache-name sanitization, colour-format helpers, and every `VkResult` string —
-as well as GPU-resource helpers (buffer, image, sampler, descriptor, and
-command-buffer creation) and queue-family / swap-chain support queries. The
-GPU-resource tests need a Vulkan ICD at runtime and self-skip when none is
-present; the Linux CI runner installs Mesa **lavapipe** (software Vulkan) and
-routes the loader to it via `VK_ICD_FILENAMES`. They complement the smoke
-tests, which exercise the full application GPU path.
+as well as the pipeline-cache persistence layer (header validation, atomic
+write, stale-temp sweeping, and path derivation) and GPU-resource helpers
+(buffer, image, sampler, descriptor, and command-buffer creation) and
+queue-family / swap-chain support queries. The GPU-resource tests need a Vulkan
+ICD at runtime and self-skip when none is present; the Linux CI runner installs
+Mesa **lavapipe** (software Vulkan) and routes the loader to it via
+`VK_ICD_FILENAMES`. They complement the smoke tests, which exercise the full
+application GPU path.
 
 Two **smoke-test** jobs build a Debug configuration (validation layers and
 synchronization validation compiled in) and run the demo plus both examples

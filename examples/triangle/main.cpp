@@ -25,8 +25,8 @@
 
 #include "Application.h"
 #include "Swapchain.h"
+#include "SwapchainRecreateInfo.h"
 #include "VulkanContext.h"
-#include "VulkanRenderer.h"  // PresentMode, SwapchainRecreateInfo
 #include "VulkanUtils.h"
 
 namespace {

@@ -12,24 +12,12 @@
 #include <string_view>
 #include <vector>
 
-#include "RendererTypes.h"  // PresentMode, SurfaceFormatPreference
+#include "RendererTypes.h"          // PresentMode, SurfaceFormatPreference
+#include "SwapchainRecreateInfo.h"  // payload of setSwapchainRecreatedCallback
 
 class ImGuiManager;
 class Swapchain;
 class VulkanContext;
-
-/// Details handed to the swap-chain-recreated callback.
-struct SwapchainRecreateInfo {
-  /// The surface format (and therefore the main render pass) changed. Pipelines
-  /// built against the old render pass are now incompatible and must be
-  /// recreated against the new `getSwapchain().renderPass`.
-  bool formatChanged{false};
-  /// The number of swap-chain images changed. Resize any of your own per-image
-  /// resources accordingly.
-  bool imageCountChanged{false};
-  /// The new swap-chain extent in pixels.
-  VkExtent2D extent{};
-};
 
 class VulkanRenderer {
  public:
