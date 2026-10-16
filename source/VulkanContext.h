@@ -7,9 +7,12 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "PipelineCacheStore.h"
 
 // Forward declarations for VMA opaque handle types so consumers don't have to
 // pull in vk_mem_alloc.h.
@@ -93,6 +96,11 @@ class VulkanContext {
   // Filesystem-safe per-app name for the pipeline-cache directory. Set once in
   // the constructor from the `appName` argument.
   std::string cacheName;
+
+  // Resolved once from cacheName: the same file is read at
+  // createPipelineCache() and written at savePipelineCache(), and re-deriving
+  // it would repeat the platform environment lookups for no reason.
+  std::filesystem::path pipelineCacheFile;
 
   // The unsanitised app name, surfaced to the driver via VkApplicationInfo so
   // vendor tooling / driver profiles can key on it. Set once in the

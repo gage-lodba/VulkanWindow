@@ -21,7 +21,7 @@
 set -euo pipefail
 
 LOG="${1:?usage: doctest-summary.sh <ctest.log> [min-test-cases]}"
-MIN_TEST_CASES="${2:-55}"
+MIN_TEST_CASES="${2:-75}"
 
 if [ ! -f "$LOG" ]; then
   echo "::error::ctest log not found: $LOG"

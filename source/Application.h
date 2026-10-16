@@ -84,8 +84,8 @@ class Application {
   /// ImGui_ImplVulkan_AddTexture) are destroyed with it and must be
   /// re-registered here.
   /// Not called for the initial swap-chain — create those resources up front
-  /// (see getContext() / getSwapchain()). Include "VulkanRenderer.h" for the
-  /// SwapchainRecreateInfo definition.
+  /// (see getContext() / getSwapchain()). Include "SwapchainRecreateInfo.h"
+  /// for the definition (forward-declared here so this header stays light).
   /// Must be called from the thread that constructed Application; not safe to
   /// invoke concurrently with run().
   void setSwapchainRecreatedCallback(
