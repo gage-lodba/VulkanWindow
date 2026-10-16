@@ -13,11 +13,15 @@ applications. Provides a windowed Vulkan renderer with depth, swap-chain
 recreation, persistent pipeline cache, and an ImGui frame loop — so apps can
 focus on their own geometry and UI.
 
-> **Upgrading from 0.1.0:** `SwapchainRecreateInfo` now lives in
+> **Upgrading:** `SwapchainRecreateInfo` now lives in
 > `SwapchainRecreateInfo.h` instead of `VulkanRenderer.h`. Consumer code that
 > included the renderer header to name the type from
 > `setSwapchainRecreatedCallback` should include the new header, which no longer
 > pulls in GLFW. Nothing else in the public surface changed.
+>
+> Release tags run to `v0.3.0`, but `PROJECT_VERSION` was left at 0.1.0 and never
+> kept in step with them, so `find_package(VulkanWindow <version>)` did not gate
+> on the version you would expect. It reads 0.4.0 from here on.
 
 <div align="center">
   <img src="assets/preview.png" alt="preview image"/>
