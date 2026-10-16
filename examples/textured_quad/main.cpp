@@ -19,9 +19,9 @@
 
 #include "Application.h"
 #include "Swapchain.h"
+#include "SwapchainRecreateInfo.h"
 #include "VulkanContext.h"
 #include "VulkanDescriptors.h"
-#include "VulkanRenderer.h"  // SwapchainRecreateInfo
 #include "VulkanResources.h"
 #include "VulkanUtils.h"
 

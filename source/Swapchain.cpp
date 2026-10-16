@@ -8,8 +8,8 @@
 #include <iostream>
 #include <stdexcept>
 
+#include "RendererTypes.h"  // PresentMode
 #include "VulkanContext.h"
-#include "VulkanRenderer.h"  // PresentMode
 #include "VulkanSelectors.h"
 #include "VulkanUtils.h"
 

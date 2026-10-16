@@ -22,6 +22,7 @@ missing `+x` would fail the job for the wrong reason.
 | `verify-examples-built.sh` | linux, macos | Assert the example executables exist (`build/examples/<name>/<name>`). `glslc` being absent makes `examples/CMakeLists.txt` `return()` early, silently producing a build with no examples. |
 | `verify-examples-built-windows.sh` | windows | The same guard for the multi-config layout (`build/examples/<name>/Release/<name>.exe`), split out because that job runs PowerShell. Plain POSIX `sh`, so it needs no execute bit. |
 | `stage-release-assets.sh` | release | Rename the macOS binary (asset names collide by basename) and restore the execute bit that `upload-artifact` strips. |
+| `verify-install-consumer.sh` | install-check | Assert the installed/exported package: the published header set is exactly the contract list (implementation headers absent), the package config files and one library per exported target are installed, and a generated `find_package(VulkanWindow CONFIG REQUIRED)` consumer configures, links, builds and runs. |
 
 ## Testing a change here
 
@@ -45,6 +46,22 @@ bash .github/scripts/doctest-summary.sh /tmp/ctest.log 55   # exits 1
 When you add tests, raise the floor passed to `doctest-summary.sh` in the linux
 job. It is a floor rather than an exact count so that honest test additions do
 not turn the build red.
+
+`verify-install-consumer.sh` is exercised the same way, against a real prefix:
+point it at an install prefix (`cmake --install` output) and any scratch
+directory, and it fails with an `::error::` annotation when a header from the
+contract list is missing, an implementation header reappeared, a package file or
+archive was not installed, or the generated consumer does not configure, build
+and run:
+
+```bash
+bash .github/scripts/verify-install-consumer.sh /tmp/vw-prefix /tmp/vw-consumer
+```
+
+The header contract is the array at the top of the script; keep it in step with
+the `install(FILES ...)` list in `CMakeLists.txt`. A header added to the package
+without being added there is reported as unexpected, which is deliberate — the
+install surface is a contract, not a glob.
 
 ## Not extracted
 

@@ -5,6 +5,7 @@
 .DS_Store
 *.user
 build/
+build-*/
 build-debug/
 imgui.ini
 CLAUDE.md

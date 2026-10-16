@@ -133,10 +133,21 @@ jobs:
         # non-zero exit. Covers the same trees the reformat baseline did.
         run: |
           clang-format-18 --version
-          clang-format-18 --dry-run --Werror \
-            source/*.cpp source/*.h \
-            examples/*/*.cpp \
-            tests/*.cpp tests/*.h
+          # globstar is what makes the ** patterns below recurse; bash does not
+          # enable it by default. Without it '**' degenerates to '*', so a header
+          # moved into source/<dir>/ would silently stop being format-checked
+          # while CI stayed green. Files are collected into an array first so an
+          # empty directory can't leave an unmatched glob to be passed to
+          # clang-format as a literal filename.
+          shopt -s globstar
+          files=()
+          for f in source/**/*.cpp source/**/*.h \
+                   examples/**/*.cpp examples/**/*.h \
+                   tests/**/*.cpp tests/**/*.h; do
+            [ -e "$f" ] && files+=("$f")
+          done
+          printf '%s\n' "Format-checking ${#files[@]} files"
+          clang-format-18 --dry-run --Werror "${files[@]}"
 
       - name: Shellcheck the CI scripts
         # The scripts in .github/scripts/ carry the guards that decide whether
@@ -201,7 +212,7 @@ jobs:
           grep -q "VulkanTestFixture: context ready" ctest.log \
             || { echo "::error::GPU-resource tests did not run (fixture skipped)"; exit 1; }
 
-          bash .github/scripts/doctest-summary.sh ctest.log 55
+          bash .github/scripts/doctest-summary.sh ctest.log 75
 
       - name: Verify examples built
         # glslc is installed, so the example targets MUST exist. If they don't,
@@ -225,6 +236,115 @@ jobs:
         with:
           name: ubuntu-latest
           path: build/VulkanWindow
+
+  install-check:
+    name: Install + find_package consumer
+    runs-on: ubuntu-latest
+    # Guards against a hang burning the 6-hour default. Generous: apt, a library
+    # build, an install, and the consumer's own configure + build.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install deps
+        # This is the only job that configures with -DVULKANWINDOW_INSTALL=ON,
+        # and that path resolves glfw3 / VulkanMemoryAllocator through
+        # find_package instead of the vendored submodules (CMakeLists.txt:65-86),
+        # so both config packages must be findable before the library is
+        # configured.
+        #
+        # glfw3: apt's libglfw3-dev ships glfw3Config.cmake on ubuntu-latest
+        # (usr/lib/x86_64-linux-gnu/cmake/glfw3/glfw3Config.cmake in the noble
+        # package's file list), so GLFW needs no build here. If a future runner
+        # image drops it, find_package(glfw3 CONFIG REQUIRED) fails loudly in the
+        # configure step below — the fallback is to build deps/GLFW with
+        # -DGLFW_INSTALL=ON into the same scratch prefix first.
+        #
+        # VulkanMemoryAllocator: no distro package provides a config module, so
+        # the vendored submodule is installed into the scratch prefix in the next
+        # step. It is a header-only INTERFACE library, so that is a configure +
+        # install, not a compile.
+        #
+        # libvulkan-dev supplies the headers and loader find_package(Vulkan)
+        # resolves here and in the consumer. No glslc, no xvfb and no ICD are
+        # needed: nothing in this job runs a Vulkan program.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev libglfw3-dev
+
+      - name: Install VulkanMemoryAllocator config package
+        # VMA only generates and installs its config when it is the top-level
+        # project (VMA_ENABLE_INSTALL defaults to PROJECT_IS_TOP_LEVEL), which is
+        # how it is configured here: as a stand-alone install into the same
+        # scratch prefix the library will be installed into.
+        run: |
+          set -euo pipefail
+
+          PREFIX="$RUNNER_TEMP/vulkanwindow-prefix"
+          cmake -S deps/VulkanMemoryAllocator -B "$RUNNER_TEMP/vma-build" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX"
+          cmake --install "$RUNNER_TEMP/vma-build"
+
+          # Assert the export we are about to depend on actually landed, instead
+          # of discovering it later as a confusing find_package failure.
+          VMA_CONFIG="$PREFIX/share/cmake/VulkanMemoryAllocator/VulkanMemoryAllocatorConfig.cmake"
+          if [ ! -f "$VMA_CONFIG" ]; then
+            echo "::error::VulkanMemoryAllocator config package not installed: $VMA_CONFIG"
+            exit 1
+          fi
+
+      - name: ccache
+        # Same convention as the linux and smoke jobs. Only the library build is
+        # compiled here, so this mostly keeps the job cheap on repeat runs.
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ${{ github.job }}
+
+      - name: Configure, build and install VulkanWindow
+        # -DVULKANWINDOW_INSTALL=ON is the configuration under test: it switches
+        # glfw3 / VulkanMemoryAllocator to find_package and emits the install and
+        # export rules. The demo, examples and tests are switched off — they are
+        # irrelevant to the install surface and would only duplicate the linux
+        # job more slowly.
+        #
+        # The dependency configs are found through CMAKE_PREFIX_PATH, which is
+        # also where this project installs to, so the consumer resolves glfw3 and
+        # VMA out of the same scratch prefix the library lives in.
+        run: |
+          set -euo pipefail
+
+          PREFIX="$RUNNER_TEMP/vulkanwindow-prefix"
+          cmake -B build-install -DCMAKE_BUILD_TYPE=Release \
+            -DVULKANWINDOW_INSTALL=ON \
+            -DVULKANWINDOW_BUILD_DEMO=OFF \
+            -DVULKANWINDOW_BUILD_EXAMPLES=OFF \
+            -DCMAKE_PREFIX_PATH="$PREFIX" \
+            -DCMAKE_INSTALL_PREFIX="$PREFIX" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-install --config Release
+          cmake --install build-install --config Release
+
+      - name: Verify the installed package with a find_package consumer
+        # Builds a throwaway CMake project in $RUNNER_TEMP that does
+        # find_package(VulkanWindow CONFIG REQUIRED), links
+        # VulkanWindow::VulkanWindow and runs the result. This is the acceptance
+        # test for the install path: it fails on a missing header in the install
+        # list, an implementation header leaking into it, an incomplete export
+        # set, a forgotten find_dependency(), or an installed header that does not
+        # compile from the prefix.
+        #
+        # The header contract, the package-file checks and the consumer project
+        # all live in .github/scripts/ so they are testable outside CI; see
+        # .github/scripts/README.md.
+        run: |
+          bash .github/scripts/verify-install-consumer.sh \
+            "$RUNNER_TEMP/vulkanwindow-prefix" \
+            "$RUNNER_TEMP/vulkanwindow-consumer"
 
   smoke:
     name: Smoke test (lavapipe + validation)
@@ -479,7 +599,7 @@ jobs:
     # Guards against a hang burning the 6-hour default. Generous:
     # Artifact download, asset staging and upload.
     timeout-minutes: 15
-    needs: [windows, linux, smoke, macos, macos-smoke]
+    needs: [windows, linux, install-check, smoke, macos, macos-smoke]
     permissions:
       contents: write
 

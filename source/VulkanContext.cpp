@@ -3,12 +3,9 @@
 #include <vk_mem_alloc.h>
 
 #include <algorithm>
-#include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
-#include <cstring>
-#include <filesystem>
-#include <fstream>
 #include <iostream>
 #include <set>
 #include <stdexcept>
@@ -16,13 +13,7 @@
 #include <string_view>
 #include <utility>
 
-#if defined(_WIN32)
-#include <process.h>
-#else
-#include <fcntl.h>
-#include <unistd.h>
-#endif
-
+#include "PipelineCacheStore.h"
 #include "VulkanSelectors.h"
 #include "VulkanUtils.h"
 
@@ -30,63 +21,6 @@ using vkutil::querySwapChainSupport;
 using vkutil::vkCheck;
 
 namespace {
-
-// Per-user cache directory for the pipeline cache file, namespaced by app name
-// so apps built on this library don't collide on one shared file. Falls back to
-// CWD only when no platform location can be determined.
-auto pipelineCachePath(const std::string &appName) -> std::filesystem::path {
-  namespace fs = std::filesystem;
-#if defined(_WIN32)
-  if (const char *localAppData = std::getenv("LOCALAPPDATA")) {
-    return fs::path(localAppData) / appName / "pipeline_cache.bin";
-  }
-#elif defined(__APPLE__)
-  if (const char *home = std::getenv("HOME")) {
-    return fs::path(home) / "Library" / "Caches" / appName /
-           "pipeline_cache.bin";
-  }
-#else
-  if (const char *xdg = std::getenv("XDG_CACHE_HOME"); xdg && xdg[0] != '\0') {
-    return fs::path(xdg) / appName / "pipeline_cache.bin";
-  }
-  if (const char *home = std::getenv("HOME")) {
-    return fs::path(home) / ".cache" / appName / "pipeline_cache.bin";
-  }
-#endif
-  return {"pipeline_cache.bin"};
-}
-
-// Remove abandoned pipeline-cache temp files (the "<name>.tmp.<pid>" siblings
-// savePipelineCache writes then renames). A process killed between write and
-// rename leaves one behind. Only sweep temps older than a minute so a
-// concurrently-running instance mid-write isn't disturbed — a real write
-// completes in milliseconds. Best-effort: all errors are swallowed.
-void sweepStalePipelineCacheTemps(const std::filesystem::path &cacheFile) {
-  namespace fs = std::filesystem;
-  std::error_code ec;
-  const fs::path dir = cacheFile.parent_path();
-  if (dir.empty()) return;
-  const std::string prefix = cacheFile.filename().string() + ".tmp.";
-
-  const auto now = fs::file_time_type::clock::now();
-  constexpr auto staleAfter = std::chrono::minutes(1);
-
-  for (fs::directory_iterator it(dir, ec), end; !ec && it != end;
-       it.increment(ec)) {
-    const std::string filename = it->path().filename().string();
-    if (!filename.starts_with(prefix)) continue;  // not one of our temps
-
-    const auto mtime = fs::last_write_time(it->path(), ec);
-    if (ec) {
-      ec.clear();
-      continue;
-    }
-    if (now - mtime < staleAfter) continue;  // recent — possibly a live writer
-
-    fs::remove(it->path(), ec);
-    ec.clear();
-  }
-}
 
 auto createDebugUtilsMessengerEXT(
     VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo,
@@ -156,7 +90,9 @@ void fillDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT &info) {
 VulkanContext::VulkanContext(GLFWwindow *window,
                              bool enableBestPracticesValidation,
                              std::string_view appName)
-    : cacheName(vkutil::sanitizeCacheName(appName)), applicationName(appName) {
+    : cacheName(vkutil::sanitizeCacheName(appName)),
+      pipelineCacheFile(vkutil::defaultPipelineCachePath(cacheName)),
+      applicationName(appName) {
   try {
     createInstance(enableBestPracticesValidation);
     setupDebugMessenger();
@@ -613,73 +549,41 @@ void VulkanContext::createPipelineCache() {
     cacheInfo.flags = VK_PIPELINE_CACHE_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
   }
 
-  // Try to load existing cache from disk
-  std::vector<char> cacheData;
-  const std::filesystem::path cachePath = pipelineCachePath(cacheName);
-  // Clear out any temp files left by a process killed mid-save (see
-  // savePipelineCache's temp→rename dance).
-  sweepStalePipelineCacheTemps(cachePath);
-  std::ifstream cacheFile(cachePath, std::ios::binary | std::ios::ate);
-  if (cacheFile.is_open()) {
-    auto size = cacheFile.tellg();
-    if (size > 0) {
-      cacheData.resize(static_cast<size_t>(size));
-      cacheFile.seekg(0);
-      cacheFile.read(cacheData.data(), size);
+  // Load any existing cache from disk. The store owns path derivation, the
+  // crash-safe write, and the header validation; this only wraps the two
+  // Vulkan calls around it. A cache built for a different device or driver is
+  // rejected by the store rather than handed to the driver.
+  const vkutil::PipelineCacheStore store(pipelineCacheFile);
+  // The device fingerprint this cache is valid for. Inlined at its single call
+  // site rather than kept as a private helper.
+  const vkutil::PipelineCacheIdentity deviceIdentity{
+      physicalDeviceProperties.vendorID,
+      physicalDeviceProperties.deviceID,
+      physicalDeviceProperties.pipelineCacheUUID,
+  };
+  if (auto cacheData = store.load(deviceIdentity);
+      cacheData.has_value() && !cacheData->empty()) {
+    cacheInfo.initialDataSize = cacheData->size();
+    cacheInfo.pInitialData = cacheData->data();
+
+    if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &pipelineCache) ==
+        VK_SUCCESS) {
+      return;
     }
-    cacheFile.close();
 
-    // Validate cache header against current device. Per Vulkan spec the
-    // header layout is:
-    //   uint32 headerLength
-    //   uint32 headerVersion
-    //   uint32 vendorID
-    //   uint32 deviceID
-    //   uint8  pipelineCacheUUID[VK_UUID_SIZE]
-    constexpr size_t kHeaderVersionOffset = sizeof(uint32_t);
-    constexpr size_t kVendorIDOffset = kHeaderVersionOffset + sizeof(uint32_t);
-    constexpr size_t kDeviceIDOffset = kVendorIDOffset + sizeof(uint32_t);
-    constexpr size_t kUUIDOffset = kDeviceIDOffset + sizeof(uint32_t);
-    constexpr size_t kHeaderSize = kUUIDOffset + VK_UUID_SIZE;
-
-    if (cacheData.size() >= kHeaderSize) {
-      uint32_t headerLength = 0;
-      uint32_t headerVersion = 0;
-      uint32_t vendorID = 0;
-      uint32_t deviceID = 0;
-      std::memcpy(&headerLength, cacheData.data(), sizeof(uint32_t));
-      std::memcpy(&headerVersion, cacheData.data() + kHeaderVersionOffset,
-                  sizeof(uint32_t));
-      std::memcpy(&vendorID, cacheData.data() + kVendorIDOffset,
-                  sizeof(uint32_t));
-      std::memcpy(&deviceID, cacheData.data() + kDeviceIDOffset,
-                  sizeof(uint32_t));
-
-      if (headerLength == kHeaderSize &&
-          headerVersion == VK_PIPELINE_CACHE_HEADER_VERSION_ONE &&
-          vendorID == physicalDeviceProperties.vendorID &&
-          deviceID == physicalDeviceProperties.deviceID &&
-          std::memcmp(cacheData.data() + kUUIDOffset,
-                      physicalDeviceProperties.pipelineCacheUUID,
-                      VK_UUID_SIZE) == 0) {
-        cacheInfo.initialDataSize = cacheData.size();
-        cacheInfo.pInitialData = cacheData.data();
-      }
-    }
+    // Non-fatal: a cache that passed our header check but that the driver
+    // still rejects (corrupt contents, driver change) costs one recompile.
+    std::cerr << "Warning: loaded pipeline cache was rejected by the driver; "
+                 "rebuilding from empty.\n";
+    cacheInfo.initialDataSize = 0;
+    cacheInfo.pInitialData = nullptr;
   }
 
   if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &pipelineCache) !=
       VK_SUCCESS) {
-    // Non-fatal: create an empty cache if loading failed (corrupt cache data
-    // that passed our header check is the most likely cause).
-    cacheInfo.initialDataSize = 0;
-    cacheInfo.pInitialData = nullptr;
-    if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &pipelineCache) !=
-        VK_SUCCESS) {
-      std::cerr << "Warning: failed to create pipeline cache; continuing "
-                   "without cache.\n";
-      pipelineCache = VK_NULL_HANDLE;
-    }
+    std::cerr << "Warning: failed to create pipeline cache; continuing "
+                 "without cache.\n";
+    pipelineCache = VK_NULL_HANDLE;
   }
 }
 
@@ -697,65 +601,14 @@ void VulkanContext::savePipelineCache() const {
 
   if (cacheSize == 0) return;
 
-  std::vector<char> cacheData(cacheSize);
+  std::vector<std::byte> cacheData(cacheSize);
   if (vkGetPipelineCacheData(device, pipelineCache, &cacheSize,
                              cacheData.data()) != VK_SUCCESS) {
     return;
   }
 
-  const std::filesystem::path cachePath = pipelineCachePath(cacheName);
-  std::error_code ec;
-  std::filesystem::create_directories(cachePath.parent_path(), ec);
-  // Ignore directory-creation errors — opening the file below will fail
-  // gracefully and we silently skip persistence.
-
-  // Write to a sibling temp file then rename, so a kill mid-write can't
-  // leave a truncated cache that fails the header check on next start.
-  // PID-suffix the temp name so two concurrent processes don't clobber each
-  // other's in-progress writes.
-#if defined(_WIN32)
-  const auto pid = static_cast<int64_t>(_getpid());
-#else
-  const auto pid = static_cast<int64_t>(::getpid());
-#endif
-  std::filesystem::path tmpPath = cachePath;
-  tmpPath += ".tmp." + std::to_string(pid);
-
-  {
-    std::ofstream cacheFile(tmpPath, std::ios::binary | std::ios::trunc);
-    if (!cacheFile.is_open()) return;
-    cacheFile.write(cacheData.data(), static_cast<std::streamsize>(cacheSize));
-    if (!cacheFile.good()) {
-      cacheFile.close();
-      std::filesystem::remove(tmpPath, ec);
-      return;
-    }
-  }
-
-  // Sync data to disk before rename so a power loss between rename and the
-  // kernel flushing dirty pages can't leave a torn cache. fsync requires a
-  // writable fd on some platforms, hence O_WRONLY. Also fsync the parent
-  // directory after the rename so the directory entry is durable. On Windows
-  // the CRT flushes on close, so this is a no-op there.
-#if !defined(_WIN32)
-  if (int fd = ::open(tmpPath.c_str(), O_WRONLY); fd >= 0) {
-    ::fsync(fd);
-    ::close(fd);
-  }
-#endif
-
-  std::filesystem::rename(tmpPath, cachePath, ec);
-  if (ec) {
-    std::filesystem::remove(tmpPath, ec);
-    return;
-  }
-
-#if !defined(_WIN32)
-  if (int fd = ::open(cachePath.parent_path().c_str(), O_RDONLY); fd >= 0) {
-    ::fsync(fd);
-    ::close(fd);
-  }
-#endif
+  const vkutil::PipelineCacheStore store(pipelineCacheFile);
+  (void)store.save(cacheData);
 }
 
 auto VulkanContext::isDeviceSuitable(VkPhysicalDevice physDevice) const
