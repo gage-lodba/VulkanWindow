@@ -44,7 +44,14 @@ struct QueueFamilyIndices {
 };
 
 struct SwapChainSupportDetails {
-  VkSurfaceCapabilitiesKHR capabilities;
+  // Value-initialised on purpose: vkGetPhysicalDeviceSurfaceCapabilitiesKHR
+  // may legitimately write only part of this struct (Mesa's lavapipe accepts a
+  // VK_EXT_headless_surface but reports no capabilities at all, since there is
+  // no presentation engine behind it). Without the initialiser the unwritten
+  // members keep whatever was on the stack, so callers would read indeterminate
+  // values — a self-consistency check like maxImageCount >= minImageCount then
+  // fails nondeterministically instead of being skipped.
+  VkSurfaceCapabilitiesKHR capabilities{};
   std::vector<VkSurfaceFormatKHR> formats;
   std::vector<VkPresentModeKHR> presentModes;
 };
