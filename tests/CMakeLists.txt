@@ -27,6 +27,7 @@ add_executable(VulkanWindowTests
   test_main.cpp
   test_utils.cpp
   test_selectors.cpp
+  test_pipeline_cache_store.cpp
   test_resources.cpp
   test_descriptors.cpp
   test_utils_gpu.cpp)
