@@ -4,7 +4,7 @@
 # 3.15), and target_link_options()/LINKER: below needs 3.13. Declaring less
 # only postpones the failure into one of those subdirectories' configure.
 cmake_minimum_required(VERSION 3.18)
-project(VulkanWindow VERSION 0.1.0)
+project(VulkanWindow VERSION 0.2.0)
 
 # True iff this CMakeLists is the top-level build, not a child of someone
 # else's add_subdirectory(). Used to gate settings that should only affect

@@ -259,19 +259,28 @@ TEST_CASE("writeFileAtomically handles a bare relative path") {
   CHECK(*readBack == blob);
 }
 
-TEST_CASE("writeFileAtomically writes the target only by rename") {
-  // Deterministic contract check for the crash-safe write. Note what this does
-  // NOT do: it does not try to observe a partially written target from another
-  // thread. An earlier version of this test did, and it was both flaky (the
-  // 32 MB write often finished before the observer's next sample, so the
-  // observation count was 0) and weak (a direct write that happened to complete
-  // looked identical to an atomic one). Timing is the wrong tool here.
+TEST_CASE("writeFileAtomically replaces the contents completely") {
+  // Contract check for the crash-safe write: after it returns, the target holds
+  // exactly the new blob (no stale tail from the previous file) and no temp
+  // file survives.
   //
-  // What IS deterministic: the write succeeds, the target ends up holding
-  // exactly the new blob, and no temp file survives. Staging through a sibling
-  // temp is what the implementation does; the sibling name is covered by the
-  // "leaves no temp" assertions in the neighbouring cases, which fail if the
-  // temp naming changes.
+  // Coverage limit, stated plainly because the name of this case used to imply
+  // more: this does NOT verify that a reader never observes a partial file.
+  // That was attempted two ways and neither works:
+  //
+  //  - A threaded observer is both flaky (the write usually finishes before the
+  //    next sample, so the observation count is 0) and weak (a direct write
+  //    that happens to complete is indistinguishable from an atomic one).
+  //  - Blocking the temp path, making the target read-only, and taking an
+  //    exclusive lock were each tried as a deterministic discriminator. All
+  //    three make BOTH a temp+rename write and a direct write fail, so none of
+  //    them separates the two implementations.
+  //
+  // The atomicity guarantee therefore rests on the implementation being a
+  // temp-then-rename (see writeFileAtomically in PipelineCacheStore.h) rather
+  // than on any test here. What is asserted below does catch the realistic
+  // regression: a write that truncates or appends in place instead of
+  // replacing.
   const TempDir tmp;
   const fs::path target = tmp.path() / "cache.bin";
 

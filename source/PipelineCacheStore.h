@@ -92,6 +92,15 @@ void sweepStaleTemps(const std::filesystem::path &target,
 /// a truncated file — which matters because a truncated cache fails the header
 /// check on the next run and silently costs a full pipeline recompile.
 ///
+/// That guarantee is structural: it holds because the write goes to a temp file
+/// and is published by rename. It is deliberately NOT asserted by a test. There
+/// is no portable deterministic way to distinguish this from a direct write —
+/// blocking the temp path, a read-only target, and an exclusive lock all fail
+/// for both — and a threaded observer is too flaky to be worth keeping. The
+/// tests cover the observable contract (exact contents, no stale tail, no
+/// surviving temp); anything that changes the temp-then-rename shape here
+/// changes an untested property, so keep that in mind when editing this.
+///
 /// Returns false on any failure, having cleaned up its temp file; persistence
 /// is best-effort and a false return is never fatal.
 [[nodiscard]] auto writeFileAtomically(const std::filesystem::path &path,
