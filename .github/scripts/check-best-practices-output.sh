@@ -6,35 +6,50 @@
 #   check-best-practices-output.sh --self-test
 #
 # The repository does not get a clean validation log when
-# VULKANWINDOW_BEST_PRACTICES is ON. There are exactly two known, expected
-# warning classes, both from third-party/benign sources rather than from
-# project misuse:
+# VULKANWINDOW_BEST_PRACTICES is ON. There are four known, expected warning
+# classes, all benign/third-party or inherent to running validation:
 #
-#   1. Vendored Dear ImGui dedicated allocations. The bundled ImGui Vulkan
-#      backend (deps/ImGui/backends/imgui_impl_vulkan.cpp) asks VMA for small
-#      dedicated allocations, and the Khronos best-practices layer reports each
-#      one as a `vkBindBufferMemory`/`vkBindImageMemory` "fully consumed by the
-#      buffer/image … should be sub-allocated" warning. That is a known upstream
-#      limitation of the bundled third-party code, not a defect here.
+#   1. Vendored Dear ImGui small dedicated allocations. The bundled ImGui Vulkan
+#      backend (deps/ImGui/backends/imgui_impl_vulkan.cpp) allocates each small
+#      buffer/image with its own vkAllocateMemory call (it does not use VMA), so
+#      the Khronos best-practices layer reports them as `vkBindBufferMemory`/
+#      `vkBindImageMemory` "fully consumed by the buffer/image … should be
+#      sub-allocated" warnings and/or `vkAllocateMemory` "very small allocation …
+#      sub-allocate from one large VkDeviceMemory" warnings. Known upstream
+#      limitation, not a defect here.
 #   2. VK_SUBOPTIMAL_KHR from vkQueuePresentKHR. The recreation smoke test
 #      deliberately resizes the window, so presenting during/after a resize can
 #      return VK_SUBOPTIMAL_KHR; the layer reports it as a warning. The app
 #      handles it by immediately recreating the swap chain (see
 #      VulkanRenderer::drawFrame), which is why a fixed number (a couple) of
 #      these appear and then the log is clean again. This is not project misuse.
+#   3. Debug validation enablement. Debug builds must enable VK_EXT_debug_utils
+#      (to deliver this layer's messages) and VK_EXT_validation_features (for
+#      synchronization and best-practices validation). Newer validation-layer
+#      versions emit best-practice warnings for those extensions — one because
+#      it is a debugging/special-use extension, one because it is deprecated in
+#      favour of VK_EXT_layer_settings. Both are inherent to enabling validation
+#      in a Debug build, not project misuse.
+#   4. vkCreateCommandPool command-buffer-reset hint. The renderer keeps one
+#      command pool shared by the in-flight frame slots and individually resets
+#      each slot's command buffer; the best-practices layer suggests resetting
+#      the whole pool instead (a performance hint). A whole-pool reset would
+#      invalidate the other slots' recorded command buffers, so the per-buffer
+#      reset is intentional.
 #
 # This script fails unless:
 #   * the log contains no `Validation Error` line at all, and
-#   * every `Validation layer:` record belongs to one of those two narrowly
-#     scoped known classes — including the layer's duplicate-message-limit note
-#     line that precedes the final copy of a repeated warning, and any
-#     continuation lines of the message.
+#   * every `Validation layer:` record belongs to one of those narrowly scoped
+#     known classes — including the layer's duplicate-message-limit note line
+#     that precedes the final copy of a repeated warning, and any continuation
+#     lines of the message.
 #
 # Everything else (any other warning, any error, any unexpected record) is
 # reported with line numbers and exits non-zero, so a new warning cannot hide
 # behind the known ones. Keep the allowlist deliberately narrow: if the
-# vendored ImGui is ever fixed or the resize coverage changes, drop the
-# corresponding pattern and the gate gets stricter.
+# vendored ImGui is ever fixed, the resize coverage changes, or the validation
+# setup/command-pool design changes, drop the corresponding pattern and the gate
+# gets stricter.
 #
 # Kept as a script (not inline YAML) so it is runnable and testable outside CI.
 # It is also linted (shellcheck) outside CI. See .github/scripts/README.md.
@@ -47,8 +62,13 @@ set -euo pipefail
 
 # Known class 1: the image/buffer phrase proves it is the dedicated-allocation
 # best-practices warning, and the sub-allocation sentence pins the VUID text.
+# Newer layers additionally report the same vendored-ImGui allocations at
+# vkAllocateMemory time ("very small allocation").
 KNOWN_ALLOC_SUBSTRING='fully consumed by the '
 KNOWN_SUBALLOC_SUBSTRING='should be sub-allocated from larger memory blocks'
+KNOWN_ALLOC_SMALL_PREFIX='vkAllocateMemory():'
+KNOWN_ALLOC_SMALL_SUBSTRING='This is a very small allocation'
+KNOWN_ALLOC_SMALL_ADVICE='sub-allocate from one large VkDeviceMemory'
 
 # Known class 2: VK_SUBOPTIMAL_KHR reported for a present while the smoke test
 # resizes the window. Matched on the exact API prefix plus the VK_SUBOPTIMAL_KHR
@@ -56,11 +76,18 @@ KNOWN_SUBALLOC_SUBSTRING='should be sub-allocated from larger memory blocks'
 KNOWN_SUBOPTIMAL_PREFIX='vkQueuePresentKHR(): pPresentInfo[0] VK_SUBOPTIMAL_KHR was returned.'
 KNOWN_SUBOPTIMAL_SUBSTRING='VK_SUBOPTIMAL_KHR - Presentation will still succeed, subject to the window resize behavior'
 
-# The Khronos layer emits this prefix line instead of a full message once a
-# VUID has been reported duplicate_message_limit times; the message body follows
-# on the next (non-prefixed) line. It is only tolerable when that body is a
-# known class — a bare note tells us a limit was hit but not which VUID.
-DUPLICATE_NOTE_REGEX='Warning - This VUID has now been reported [0-9]+ times, which is the duplicate_message_limit value'
+# Known class 3: best-practice warnings about the extensions Debug builds must
+# enable for validation (VK_EXT_debug_utils for the messenger,
+# VK_EXT_validation_features for synchronization/best-practices validation).
+# Newer validation layers flag them as special-use / deprecated.
+KNOWN_VALIDATION_SETUP_SPECIALUSE='UNASSIGNED-BestPractices-vkCreateInstance-specialuse-extension-debugging'
+KNOWN_VALIDATION_SETUP_DEPRECATED='UNASSIGNED-BestPractices-vkCreateInstance-deprecated-extension'
+
+# Known class 4: best-practice performance hint about resetting the whole
+# command pool. The renderer deliberately resets each frame slot's command
+# buffer individually from one shared pool (a whole-pool reset would invalidate
+# other in-flight slots' recordings).
+KNOWN_COMMAND_POOL_RESET='UNASSIGNED-BestPractices-vkCreateCommandPool-command-buffer-reset'
 
 fail() {
   echo "::error::$1"
@@ -68,7 +95,8 @@ fail() {
 }
 
 # Classify one `Validation layer:` record (all of its lines joined with
-# newlines). Echoes one of: alloc | suboptimal | foreign.
+# newlines). Echoes one of: alloc | suboptimal | validation_setup |
+# command_pool_reset | foreign.
 classify_record() {
   local joined="$1"
   if [[ "$joined" == *"$KNOWN_ALLOC_SUBSTRING"* ]] &&
@@ -76,9 +104,24 @@ classify_record() {
     echo "alloc"
     return 0
   fi
+  if [[ "$joined" == *"$KNOWN_ALLOC_SMALL_PREFIX"* ]] &&
+    [[ "$joined" == *"$KNOWN_ALLOC_SMALL_SUBSTRING"* ]] &&
+    [[ "$joined" == *"$KNOWN_ALLOC_SMALL_ADVICE"* ]]; then
+    echo "alloc"
+    return 0
+  fi
   if [[ "$joined" == *"$KNOWN_SUBOPTIMAL_PREFIX"* ]] &&
     [[ "$joined" == *"$KNOWN_SUBOPTIMAL_SUBSTRING"* ]]; then
     echo "suboptimal"
+    return 0
+  fi
+  if [[ "$joined" == *"$KNOWN_VALIDATION_SETUP_SPECIALUSE"* ]] ||
+    [[ "$joined" == *"$KNOWN_VALIDATION_SETUP_DEPRECATED"* ]]; then
+    echo "validation_setup"
+    return 0
+  fi
+  if [[ "$joined" == *"$KNOWN_COMMAND_POOL_RESET"* ]]; then
+    echo "command_pool_reset"
     return 0
   fi
   echo "foreign"
@@ -97,6 +140,8 @@ check_log() {
   local total=0
   local allowed_alloc=0
   local allowed_suboptimal=0
+  local allowed_validation_setup=0
+  local allowed_command_pool_reset=0
   local foreign=0
   local lineno=0
   local prefix_line=0
@@ -119,14 +164,16 @@ check_log() {
       suboptimal)
         allowed_suboptimal=$((allowed_suboptimal + 1))
         ;;
+      validation_setup)
+        allowed_validation_setup=$((allowed_validation_setup + 1))
+        ;;
+      command_pool_reset)
+        allowed_command_pool_reset=$((allowed_command_pool_reset + 1))
+        ;;
       *)
         foreign=$((foreign + 1))
         echo "::error::unexpected validation message at ${log}:${prefix_line}:"
         printf '%s\n' "$record" | sed -e 's/^/    /'
-        if [[ "$record" =~ $DUPLICATE_NOTE_REGEX ]] &&
-          [[ "$record" != *"$KNOWN_ALLOC_SUBSTRING"* ]]; then
-          echo "::error::${log}:${prefix_line}: duplicate-message-limit note with no known message body"
-        fi
         ;;
     esac
     record=""
@@ -161,13 +208,17 @@ check_log() {
   echo "  Validation layer records:                                     ${total}"
   echo "  allowlisted vendored-ImGui small-allocation warnings:         ${allowed_alloc}"
   echo "  allowlisted VK_SUBOPTIMAL_KHR resize-present warnings:        ${allowed_suboptimal}"
+  echo "  allowlisted validation-enablement extension warnings:         ${allowed_validation_setup}"
+  echo "  allowlisted command-pool whole-reset hints:                   ${allowed_command_pool_reset}"
   echo "  unexpected validation messages:                               ${foreign}"
 
   if [ "$errors" -ne 0 ] || [ "$foreign" -ne 0 ]; then
     echo "::error::best-practices validation log is not clean: ${errors} error(s), ${foreign} unexpected message(s)"
     return 1
   fi
-  echo "OK: no validation errors; every warning is one of the two known classes (vendored-ImGui dedicated allocations, resize-present VK_SUBOPTIMAL_KHR)"
+  echo "OK: no validation errors; every warning is one of the four known classes"
+  echo "    (vendored-ImGui allocations, resize VK_SUBOPTIMAL_KHR, validation-enablement"
+  echo "     extensions, intentional per-buffer command-pool reset hint)"
   return 0
 }
 
@@ -262,11 +313,32 @@ Validation layer: vkBindBufferMemory(): Trying to bind VkBuffer 0x6 to a memory 
 Validation Error: [ VUID-vkCreateInstance-ppEnabledExtensionNames-01388 ] something is wrong
 EOF
 
+  # The newer validation-layer versions additionally report the same vendored
+  # ImGui allocations at vkAllocateMemory time, the Debug validation-enablement
+  # extensions, and the deliberate per-buffer command-pool reset design.
+  cat >"${tmpdir}/known-new-classes.log" <<'EOF'
+Selected GPU: Example GPU (Vulkan 1.4.0)
+Validation layer: Validation Warning: [ UNASSIGNED-BestPractices-vkCreateInstance-specialuse-extension-debugging ] | MessageID = 0x1 | vkCreateInstance():  Attempting to enable extension VK_EXT_debug_utils, but this extension is intended to support use by applications when debugging and it is strongly recommended that it be otherwise avoided.
+Validation layer: Validation Warning: [ UNASSIGNED-BestPractices-vkCreateInstance-deprecated-extension ] | MessageID = 0x2 | vkCreateInstance():  Attempting to enable deprecated extension VK_EXT_validation_features, but this extension has been deprecated by VK_EXT_layer_settings.
+Validation layer: Validation Performance Warning: [ UNASSIGNED-BestPractices-vkCreateCommandPool-command-buffer-reset ] | MessageID = 0x3 | vkCreateCommandPool(): pCreateInfo->flags VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT is set. Consider resetting entire pool instead.
+Validation layer: Validation Performance Warning: [ UNASSIGNED-BestPractices-vkAllocateMemory-small-allocation ] | MessageID = 0x4 | vkAllocateMemory():  Allocating a VkDeviceMemory of size 28928. This is a very small allocation (current threshold is 262144 bytes). You should make large allocations and sub-allocate from one large VkDeviceMemory.
+Validation layer: vkBindBufferMemory(): Trying to bind VkBuffer 0x7 to a memory block which is fully consumed by the buffer. The required size of the allocation is 192, but smaller buffers like this should be sub-allocated from larger memory blocks. (Current threshold is 1048576 bytes)
+EOF
+
+  # Narrowness guard for the new best-practices classes: a different
+  # UNASSIGNED-BestPractices warning must still fail the gate.
+  cat >"${tmpdir}/foreign-bestpractice.log" <<'EOF'
+Selected GPU: Example GPU (Vulkan 1.4.0)
+Validation layer: Validation Warning: [ UNASSIGNED-BestPractices-vkCreateDevice-something-new ] | MessageID = 0x5 | some other best-practices warning we do not know about
+EOF
+
   expect_pass "clean log (no validation output)" "${tmpdir}/clean.log"
   expect_pass "known vendored-ImGui warnings only" "${tmpdir}/known.log"
   expect_pass "known warning with duplicate-message-limit note" "${tmpdir}/known-duplicate-note.log"
   expect_pass "known vendored warnings plus resize VK_SUBOPTIMAL_KHR warnings" "${tmpdir}/known-plus-suboptimal.log"
+  expect_pass "newer-layer known classes (validation setup, command pool, allocate)" "${tmpdir}/known-new-classes.log"
   expect_fail "foreign warning after known warning" "${tmpdir}/foreign-warning.log"
+  expect_fail "foreign best-practices warning" "${tmpdir}/foreign-bestpractice.log"
   expect_fail "present warning that is not VK_SUBOPTIMAL_KHR" "${tmpdir}/present-but-not-suboptimal.log"
   expect_fail "validation error after known warning" "${tmpdir}/validation-error.log"
   expect_fail "missing log file" "${tmpdir}/does-not-exist.log"
@@ -276,7 +348,7 @@ EOF
     echo "::error::check-best-practices-output.sh self-test FAILED (${failures} case(s))"
     return 1
   fi
-  echo "OK: check-best-practices-output.sh self-test passed (8 cases)"
+  echo "OK: check-best-practices-output.sh self-test passed (10 cases)"
   return 0
 }
 

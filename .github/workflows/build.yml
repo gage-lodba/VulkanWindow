@@ -500,15 +500,23 @@ jobs:
         # synchronization validation, so regressions like "this small object
         # should be sub-allocated" become CI failures instead of log noise.
         #
-        # Two known warning classes are allowlisted (see
+        # Four known warning classes are allowlisted (see
         # .github/scripts/check-best-practices-output.sh); any other validator
         # output — warning or error — fails the job:
-        #   1. the vendored Dear ImGui Vulkan backend asks VMA for small
-        #      dedicated allocations, which the layer reports as best-practices
-        #      "should be sub-allocated" warnings (upstream ImGui limitation);
+        #   1. the vendored Dear ImGui Vulkan backend backs each small buffer/
+        #      image with its own vkAllocateMemory call (it does not use VMA),
+        #      reported as "should be sub-allocated"/"very small allocation"
+        #      best-practices warnings (upstream ImGui limitation);
         #   2. VK_SUBOPTIMAL_KHR present warnings while the recreation test
         #      deliberately resizes the window (handled by immediate swap-chain
-        #      recreation, so only a couple appear and the log cleans up).
+        #      recreation, so only a couple appear and the log cleans up);
+        #   3. debug-build validation-enablement extension warnings for
+        #      VK_EXT_debug_utils / VK_EXT_validation_features (newer layers flag
+        #      them as special-use/deprecated; they are inherent to Debug
+        #      validation);
+        #   4. the command-pool whole-reset performance hint (the renderer
+        #      deliberately resets each frame slot's command buffer individually
+        #      from one shared pool).
         run: |
           set -euo pipefail
 

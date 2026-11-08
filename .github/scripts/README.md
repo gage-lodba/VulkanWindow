@@ -23,7 +23,7 @@ missing `+x` would fail the job for the wrong reason.
 | `verify-examples-built-windows.sh` | windows | The same guard for the multi-config layout (`build/examples/<name>/Release/<name>.exe`), split out because that job runs PowerShell. Plain POSIX `sh`, so it needs no execute bit. |
 | `stage-release-assets.sh` | release | Rename the macOS binary (asset names collide by basename) and restore the execute bit that `upload-artifact` strips. |
 | `verify-install-consumer.sh` | install-check | Assert the installed/exported package: the published header set is exactly the contract list (implementation headers absent), the package config files and one library per exported target are installed, and a generated `find_package(VulkanWindow CONFIG REQUIRED)` consumer configures, links, builds and runs. |
-| `check-best-practices-output.sh` | smoke (best-practices gate) | Validate a best-practices-run validation log: fail on any `Validation Error` and on any `Validation layer:` record outside the two narrowly-scoped known classes — (1) vendored-ImGui dedicated-allocation warnings (including the layer's duplicate-message-limit note line) and (2) the expected `VK_SUBOPTIMAL_KHR` resize-present warnings from the resize-exercising recreation test (handled by immediate swap-chain recreation). Has a `--self-test` mode that exercises clean/allowlisted/known+suboptimal/foreign-warning/error fixtures, including a lookalike present warning that must still fail. |
+| `check-best-practices-output.sh` | smoke (best-practices gate) | Validate a best-practices-run validation log: fail on any `Validation Error` and on any `Validation layer:` record outside the four narrowly-scoped known classes — (1) vendored-ImGui small dedicated-allocation warnings at bind and allocate time (including the layer's duplicate-message-limit note line), (2) the expected `VK_SUBOPTIMAL_KHR` resize-present warnings from the resize-exercising recreation test (handled by immediate swap-chain recreation), (3) debug-build validation-enablement extension warnings (`VK_EXT_debug_utils`/`VK_EXT_validation_features` special-use/deprecated), and (4) the intentional per-buffer command-pool reset performance hint. Has a `--self-test` mode that exercises clean/allowlisted/newer-layer-classes/foreign-warning/error fixtures, including a lookalike present warning that must still fail. |
 
 ## Testing a change here
 
@@ -69,12 +69,14 @@ install surface is a contract, not a glob.
 pass/fail classifier without a Vulkan device. To check a real log, run a
 `VULKANWINDOW_BEST_PRACTICES=ON` Debug binary with
 `VULKANWINDOW_VALIDATION_ABORT=1`, capture stdout+stderr, then pass the log path
-to the script. The allowlist is deliberately narrow: exactly the vendored-ImGui
-small-dedicated-allocation warning class and the `VK_SUBOPTIMAL_KHR` present
-warnings that the resize-exercising recreation test legitimately produces (the
-app recreates the swap chain immediately; a couple of warnings appear, then the
-log is clean). Widen it only for a new *known* third-party/benign limitation,
-never to silence a project diagnostic.
+to the script. The allowlist is deliberately narrow: the vendored-ImGui small
+dedicated-allocation warnings (bind and allocate forms), the `VK_SUBOPTIMAL_KHR`
+present warnings that the resize-exercising recreation test legitimately
+produces (the app recreates the swap chain immediately; a couple of warnings
+appear, then the log is clean), the debug-validation-enablement extension
+warnings that newer validation layers emit, and the intentional per-buffer
+command-pool reset performance hint. Widen it only for a new *known*
+third-party/benign limitation, never to silence a project diagnostic.
 
 ## Not extracted
 

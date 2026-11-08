@@ -538,23 +538,34 @@ turn validation problems into job failures. Release builds compile validation
 out.
 
 `VULKANWINDOW_BEST_PRACTICES=ON` additionally enables
-`VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT` in Debug builds. Two warning
+`VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT` in Debug builds. Four warning
 classes are expected and allowlisted; everything else is fatal:
 
 1. The vendored Dear ImGui Vulkan backend backs each small buffer/image with its
    own `vkAllocateMemory` call (it does not use VMA), which the layer reports as
    `vkBindBufferMemory`/`vkBindImageMemory` "fully consumed by the buffer/image …
-   should be sub-allocated" warnings — a known upstream ImGui limitation, not
-   this project's allocation behaviour.
+   should be sub-allocated" warnings and/or `vkAllocateMemory` "very small
+   allocation … sub-allocate from one large VkDeviceMemory" warnings — a known
+   upstream ImGui limitation, not this project's allocation behaviour.
 2. The swapchain-recreation smoke test deliberately resizes the window, so
    presenting during/after a resize can return `VK_SUBOPTIMAL_KHR` and the layer
    reports it (`vkQueuePresentKHR(): pPresentInfo[0] VK_SUBOPTIMAL_KHR was
    returned. …`). The renderer handles it by immediately recreating the swap
    chain, so only a couple appear and the log is clean again; it is not project
    misuse and is unavoidable while exercising resize.
+3. Debug builds must enable `VK_EXT_debug_utils` (to deliver validation messages)
+   and `VK_EXT_validation_features` (for synchronization/best-practices
+   validation), which newer validation layers flag as debugging-only/special-use
+   and deprecated (in favour of `VK_EXT_layer_settings`). Both are inherent to
+   enabling validation in Debug builds, not project misuse.
+4. The command pool uses `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT` with
+   one pool shared by the in-flight frame slots, resetting each slot's command
+   buffer individually; the layer suggests resetting the whole pool as a
+   performance hint. A whole-pool reset would invalidate the other slots'
+   recorded command buffers, so the per-buffer reset is intentional.
 
 CI runs the demo and the swapchain-recreation regression with the option on,
-allowlists exactly these two classes
+allowlists exactly these four classes
 (`.github/scripts/check-best-practices-output.sh`), and fails on any other
 validator message. Run the same gate locally with:
 
