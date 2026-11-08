@@ -7,5 +7,6 @@
 build/
 build-*/
 build-debug/
+CMakeUserPresets.json
 imgui.ini
 CLAUDE.md

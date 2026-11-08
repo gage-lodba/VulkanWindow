@@ -18,7 +18,9 @@
 #   2. the exported package files and one library per exported target are in
 #      the prefix,
 #   3. a throwaway consumer project doing find_package(VulkanWindow CONFIG
-#      REQUIRED) + VulkanWindow::VulkanWindow configures, builds and runs.
+#      REQUIRED) + VulkanWindow::VulkanWindow configures, builds and runs. Its
+#      translation unit #includes every public header in the contract list, so a
+#      header that stops being self-contained fails here too.
 #
 # Step 3 is the part that cannot be faked: it fails on an export set that
 # references a target the package does not export, on a VulkanWindowConfig.cmake
@@ -227,11 +229,23 @@ cat > "$CONSUMER_SRC/main.cpp" <<'CONSUMER_CPP'
 #endif
 
 // Public headers, included the way the README shows consumers doing it: plain
-// names, resolved through the exported target's include directories. This is
-// exactly what breaks when the install list omits a header that a public header
-// includes, or when the include directories stop being exported.
+// names, resolved through the exported target's include directories. EVERY
+// header the install rule publishes is included here, so the acceptance test
+// fails if any one of them stops resolving or stops compiling from the prefix
+// (a missing transitive include, a private header dependency leaking in, a
+// broken INSTALL_INTERFACE, ...). This is what makes the "installed headers
+// compile" claim in build.yml/README true rather than aspirational.
 #include "Application.h"
+#include "PipelineCacheStore.h"
+#include "RendererTypes.h"
+#include "Swapchain.h"
+#include "SwapchainRecreateInfo.h"
+#include "UserInterface.h"
+#include "VulkanContext.h"
+#include "VulkanDescriptors.h"
+#include "VulkanResources.h"
 #include "VulkanSelectors.h"
+#include "VulkanUtils.h"
 
 // Bundled Dear ImGui: proves the imgui include directories and the installed
 // deps/ImGui layout resolve from the prefix.
@@ -252,9 +266,25 @@ int main() {
   const char *imgui_version = ImGui::GetVersion();
   std::printf("consumer ok: %s (imgui %s)\n", cache_name.c_str(), imgui_version);
 
-  // Compile-time-only use of the main public type, so Application.h must be a
-  // complete, self-contained header.
-  static_assert(sizeof(Application) > 0, "Application must be a complete type");
+  // Compile-time-only completeness checks: each public header must define the
+  // complete types it promises, self-contained, from the installed tree.
+  static_assert(sizeof(Application) > 0, "Application.h must provide a complete type");
+  static_assert(sizeof(VulkanContext) > 0, "VulkanContext.h must provide a complete type");
+  static_assert(sizeof(Swapchain) > 0, "Swapchain.h must provide a complete type");
+  static_assert(sizeof(SwapchainRecreateInfo) > 0,
+                "SwapchainRecreateInfo.h must provide a complete type");
+  static_assert(sizeof(UserInterface) > 0, "UserInterface.h must provide a complete type");
+  static_assert(sizeof(vkutil::Buffer) > 0, "VulkanResources.h must be self-contained");
+  static_assert(sizeof(vkutil::Image) > 0, "VulkanResources.h must be self-contained");
+  static_assert(sizeof(vkutil::DescriptorBinding) > 0,
+                "VulkanDescriptors.h must be self-contained");
+  static_assert(sizeof(vkutil::PipelineCacheStore) > 0,
+                "PipelineCacheStore.h must be self-contained");
+  static_assert(sizeof(PresentMode) > 0, "RendererTypes.h must be self-contained");
+  static_assert(sizeof(SurfaceFormatPreference) > 0,
+                "RendererTypes.h must be self-contained");
+  static_assert(sizeof(vkutil::QueueFamilyIndices) > 0,
+                "VulkanUtils.h must be self-contained");
   return 0;
 }
 CONSUMER_CPP

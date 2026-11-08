@@ -68,5 +68,7 @@ install surface is a contract, not a glob.
 Some shell stays inline because it is genuinely job-specific and extracting it
 would add indirection without making anything testable: the per-job `apt-get` /
 `brew` dependency lists, the Vulkan SDK version resolution and cache setup, the
-`ccache` action, the smoke-run loops, and the release job's `chmod`/rename
-wrappers (now a single script call).
+`ccache` action, and the smoke-run loops (including their per-binary frame caps
+and success-marker greps). The release job's asset renaming and execute-bit
+restoration *are* extracted into `stage-release-assets.sh`; only the tag/version
+consistency check and the publish step remain inline there.

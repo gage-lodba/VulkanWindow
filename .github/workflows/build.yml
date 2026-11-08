@@ -16,6 +16,16 @@ on:
       # The extracted CI scripts: a PR that only edits one of these must still
       # run the job that executes it.
       - '.github/scripts/**'
+      # Lint/format configuration and line-ending rules are CI gates themselves:
+      # a PR that only edits them must still exercise the gate it changes.
+      - '.clang-format'
+      - '.clang-tidy'
+      - 'examples/.clang-tidy'
+      - '.gitattributes'
+      - '.gitmodules'
+      # Submodule pins are a gitlink under deps/: a GLFW/ImGui/VMA bump changes
+      # build behaviour and must not be able to skip CI.
+      - 'deps/**'
       - 'source/**'
       - 'examples/**'
       - 'tests/**'
@@ -86,7 +96,7 @@ jobs:
         # default generator here and it is multi-configuration, so CMake appends
         # Release to each target's own binary directory).
         shell: pwsh
-        run: sh .github/scripts/verify-examples-built-windows.sh build
+        run: bash .github/scripts/verify-examples-built-windows.sh build
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -118,8 +128,8 @@ jobs:
         # scripts under .github/scripts/ (see the shellcheck step below).
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-multilib g++-multilib vulkan-tools libvulkan-dev \
-            mesa-vulkan-drivers glslc \
+          sudo apt-get install -y libvulkan-dev \
+            mesa-vulkan-drivers vulkan-validationlayers glslc \
             xorg-dev libxkbcommon-dev \
             libwayland-dev libwayland-bin wayland-protocols clang-tidy clang-format-18 \
             shellcheck
@@ -196,6 +206,12 @@ jobs:
         #    suite is intact. Both live in .github/scripts/doctest-summary.sh so
         #    they can be exercised against synthetic logs outside CI.
         #
+        # The suite is also forced through the Khronos validation layer
+        # (VK_INSTANCE_LAYERS) so invalid test-side Vulkan usage fails here
+        # instead of passing because the driver tolerates it. The layer manifest
+        # is asserted to exist first, so a missing package can't silently turn
+        # the validation gate off.
+        #
         # MIN_TEST_CASES is a floor, not an exact count: pinning the exact number
         # makes every honest test addition a red build, and a guard that cries
         # wolf gets rubber-stamped. Raise it when you add tests.
@@ -208,9 +224,25 @@ jobs:
             exit 1
           fi
           export VK_ICD_FILENAMES="$LVP" VK_DRIVER_FILES="$LVP"
+
+          LAYER_JSON="$(ls /usr/share/vulkan/explicit_layer.d/*validation*.json 2>/dev/null | head -n1 || true)"
+          if [ -z "$LAYER_JSON" ]; then
+            echo "::error::validation layer manifest not found — the suite would run without validation"
+            exit 1
+          fi
+          echo "validation layer: $LAYER_JSON"
+          export VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
+
           ctest --test-dir build --output-on-failure -V 2>&1 | tee ctest.log
           grep -q "VulkanTestFixture: context ready" ctest.log \
             || { echo "::error::GPU-resource tests did not run (fixture skipped)"; exit 1; }
+
+          # The unit-test suite must be validation-clean, not merely green.
+          if grep -q "Validation Error" ctest.log; then
+            echo "::error::validation errors were reported while running the unit tests"
+            grep -n "Validation Error" ctest.log | head -20
+            exit 1
+          fi
 
           bash .github/scripts/doctest-summary.sh ctest.log 75
 
@@ -379,10 +411,13 @@ jobs:
 
       - name: Configure
         # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
-        # validation (see VulkanContext / VulkanRenderer). ccache skips
-        # recompiling unchanged deps across runs.
+        # validation (see VulkanContext / VulkanRenderer). Tests are built here
+        # too so the swapchain-recreation regression binary can be smoke-run
+        # (doctest is fetched via FetchContent). ccache skips recompiling
+        # unchanged deps across runs.
         run: |
           cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
+            -DVULKANWINDOW_BUILD_TESTS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
@@ -392,8 +427,11 @@ jobs:
         # Renders a fixed number of frames then exits; aborts with a non-zero
         # status on any validation error or synchronization-validation hazard,
         # so a regression that compiles and lints clean still fails CI. Runs the
-        # demo AND both examples — the examples exercise the consumer-facing
-        # buffer / texture / descriptor / pipeline paths the demo doesn't.
+        # demo, both examples, and the swapchain-recreation regression test —
+        # the examples exercise the consumer-facing buffer / texture /
+        # descriptor / pipeline paths the demo doesn't, and the recreation test
+        # covers a runtime present-mode switch (the B1 crash: rebuilt ImGui
+        # manager whose backends were never re-initialised).
         run: |
           set -euo pipefail
 
@@ -412,28 +450,35 @@ jobs:
           ls /usr/share/vulkan/explicit_layer.d/ | grep -qi validation \
             || { echo "::error::validation layer manifest not installed"; exit 1; }
 
-          export VULKANWINDOW_MAX_FRAMES=120
           export VULKANWINDOW_VALIDATION_ABORT=1
 
-          bins=(
-            ./build-debug/VulkanWindow
-            ./build-debug/examples/triangle/VulkanWindowTriangle
-            ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad
-          )
-          for bin in "${bins[@]}"; do
+          # run_smoke <binary> <frames> [required output marker]
+          run_smoke() {
+            local bin="$1" frames="$2" marker="${3:-}"
             if [ ! -x "$bin" ]; then
               echo "::error::expected smoke binary missing: $bin (glslc not found at configure?)"
               exit 1
             fi
-            echo "=== smoke: $bin ==="
-            # timeout guards against a hang; the binary self-exits at 120 frames.
-            timeout 180 xvfb-run -a "$bin" 2>&1 | tee run.log
+            echo "=== smoke: $bin (${frames} frames) ==="
+            # timeout guards against a hang; the binary self-exits at $frames.
+            VULKANWINDOW_MAX_FRAMES="$frames" timeout 180 xvfb-run -a "$bin" 2>&1 | tee run.log
             if grep -q "running without validation" run.log; then
               echo "::error::validation layer was not active for $bin — smoke test is meaningless"
               exit 1
             fi
-          done
-          echo "Smoke test passed: demo + 2 examples, 120 frames each under lavapipe, validation active, no errors."
+            if [ -n "$marker" ] && ! grep -q "$marker" run.log; then
+              echo "::error::$bin did not report '$marker'"
+              exit 1
+            fi
+          }
+
+          run_smoke ./build-debug/VulkanWindow 120
+          run_smoke ./build-debug/examples/triangle/VulkanWindowTriangle 120
+          run_smoke ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad 120
+          # Present-mode-switch regression: switches at frames 10/20/30, asserts
+          # the ImGui-context-rebuild flags, prints its success marker.
+          run_smoke ./build-debug/tests/VulkanWindowSwapchainRecreation 40 "recreation smoke OK"
+          echo "Smoke test passed: demo + 2 examples + swapchain-recreation regression, validation active, no errors."
 
   macos:
     name: Build (macOS / MoltenVK)
@@ -506,9 +551,12 @@ jobs:
 
       - name: Configure
         # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
-        # validation (see VulkanContext / VulkanRenderer).
+        # validation (see VulkanContext / VulkanRenderer). Tests are built here
+        # too so the swapchain-recreation regression binary can be smoke-run
+        # (doctest is fetched via FetchContent).
         run: |
           cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
+            -DVULKANWINDOW_BUILD_TESTS=ON \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)"
 
       - name: Build
@@ -519,7 +567,8 @@ jobs:
         # validation error or synchronization-validation hazard. MoltenVK is the
         # only ICD; the validation layer comes from the Homebrew manifest dir.
         # No xvfb (that's X11) — the macOS runner's window server backs the
-        # GLFW/Metal surface directly. Runs the demo AND both examples.
+        # GLFW/Metal surface directly. Runs the demo, both examples, and the
+        # swapchain-recreation regression test.
         run: |
           set -euo pipefail
 
@@ -565,30 +614,37 @@ jobs:
           export DYLD_LIBRARY_PATH="$(dirname "$VK_LAYER_LIB")${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           echo "Validation layer dylib dir: $(dirname "$VK_LAYER_LIB")"
 
-          export VULKANWINDOW_MAX_FRAMES=120
           export VULKANWINDOW_VALIDATION_ABORT=1
 
-          bins=(
-            ./build-debug/VulkanWindow
-            ./build-debug/examples/triangle/VulkanWindowTriangle
-            ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad
-          )
-          for bin in "${bins[@]}"; do
+          # run_smoke <binary> <frames> [required output marker]
+          run_smoke() {
+            local bin="$1" frames="$2" marker="${3:-}"
             if [ ! -x "$bin" ]; then
               echo "::error::expected smoke binary missing: $bin (glslc not found at configure?)"
               exit 1
             fi
-            echo "=== smoke: $bin ==="
+            echo "=== smoke: $bin (${frames} frames) ==="
             # gtimeout (coreutils) guards against a hang; the binary self-exits
-            # at 120 frames. set -o pipefail propagates a validation-abort
-            # non-zero exit through the `| tee` pipeline so it fails the job.
-            gtimeout 180 "$bin" 2>&1 | tee run.log
+            # at $frames. set -o pipefail propagates a validation-abort non-zero
+            # exit through the `| tee` pipeline so it fails the job.
+            VULKANWINDOW_MAX_FRAMES="$frames" gtimeout 180 "$bin" 2>&1 | tee run.log
             if grep -q "running without validation" run.log; then
               echo "::error::validation layer was not active for $bin — smoke test is meaningless"
               exit 1
             fi
-          done
-          echo "macOS smoke passed: demo + 2 examples, 120 frames each under MoltenVK, validation active, no errors."
+            if [ -n "$marker" ] && ! grep -q "$marker" run.log; then
+              echo "::error::$bin did not report '$marker'"
+              exit 1
+            fi
+          }
+
+          run_smoke ./build-debug/VulkanWindow 120
+          run_smoke ./build-debug/examples/triangle/VulkanWindowTriangle 120
+          run_smoke ./build-debug/examples/textured_quad/VulkanWindowTexturedQuad 120
+          # Present-mode-switch regression: switches at frames 10/20/30, asserts
+          # the ImGui-context-rebuild flags, prints its success marker.
+          run_smoke ./build-debug/tests/VulkanWindowSwapchainRecreation 40 "recreation smoke OK"
+          echo "macOS smoke passed: demo + 2 examples + swapchain-recreation regression, validation active, no errors."
 
   release:
     name: Release
@@ -623,6 +679,30 @@ jobs:
         # 2. Restore the execute bit that actions/upload-artifact normalises
         #    away, which otherwise publishes 0644 binaries.
         run: bash .github/scripts/stage-release-assets.sh .
+
+      - name: Verify tag matches PROJECT_VERSION
+        # The release is only as honest as the version it advertises. v0.1.0 to
+        # v0.3.0 shipped while project(VERSION) still read 0.1.0, and the
+        # install tree derives VulkanWindowConfigVersion.cmake from that value —
+        # so a tag whose version disagrees with CMakeLists.txt would publish a
+        # release (and package) that misreports itself. Fail here, before the
+        # publish step, instead of shipping the mismatch.
+        run: |
+          set -euo pipefail
+
+          TAG="${GITHUB_REF_NAME#v}"
+          PROJECT_VERSION="$(sed -n 's/^project(VulkanWindow VERSION \([0-9][0-9.]*\)).*/\1/p' CMakeLists.txt)"
+          if [ -z "$PROJECT_VERSION" ]; then
+            echo "::error::could not read project(VulkanWindow VERSION ...) from CMakeLists.txt"
+            exit 1
+          fi
+          echo "release tag:      ${GITHUB_REF_NAME} (version ${TAG})"
+          echo "PROJECT_VERSION:  ${PROJECT_VERSION}"
+          if [ "$TAG" != "$PROJECT_VERSION" ]; then
+            echo "::error::tag ${GITHUB_REF_NAME} does not match PROJECT_VERSION ${PROJECT_VERSION} — bump CMakeLists.txt in the tagged commit (or retag) before releasing"
+            exit 1
+          fi
+          echo "OK: ${GITHUB_REF_NAME} matches PROJECT_VERSION ${PROJECT_VERSION}"
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

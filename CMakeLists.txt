@@ -4,7 +4,7 @@
 # 3.15), and target_link_options()/LINKER: below needs 3.13. Declaring less
 # only postpones the failure into one of those subdirectories' configure.
 cmake_minimum_required(VERSION 3.18)
-project(VulkanWindow VERSION 0.4.0)
+project(VulkanWindow VERSION 0.4.1)
 
 # True iff this CMakeLists is the top-level build, not a child of someone
 # else's add_subdirectory(). Used to gate settings that should only affect
@@ -43,11 +43,13 @@ option(VULKANWINDOW_BUILD_TESTS
   "Build the unit tests (fetches doctest via FetchContent). Requires CMake >= 3.18."
   OFF)
 # When ON, install rules are emitted AND glfw3 / VulkanMemoryAllocator are
-# resolved via find_package instead of the vendored submodules. Off by
-# default because the bundled-submodule build is the dev-friendly default;
-# installation is a vcpkg/Conan/system-packager concern.
+# resolved via find_package instead of their vendored submodules. Dear ImGui is
+# the exception: there is no system-package contract for it here, so the
+# bundled target is still compiled from deps/ImGui and installed with the
+# package. Off by default because the bundled-submodule build is the
+# dev-friendly default; installation is a vcpkg/Conan/system-packager concern.
 option(VULKANWINDOW_INSTALL
-  "Generate install rules. Requires find_package(glfw3, VulkanMemoryAllocator)."
+  "Generate install rules. Requires find_package(glfw3, VulkanMemoryAllocator); Dear ImGui is still built from deps/ImGui."
   OFF)
 
 # Vulkan
@@ -89,9 +91,13 @@ endif()
 # already brings its own ImGui (own add_library, FetchContent, etc.) can
 # provide it instead of getting duplicate-symbol link errors. If the parent
 # defines an `imgui` target before add_subdirectory'ing us, that target is
-# used as-is and must include the Vulkan and GLFW backends compatible with
-# our renderer (see ImGuiManager.cpp PipelineInfoMain usage — Dear ImGui
-# >= 1.92.4).
+# used as-is and must include the Vulkan and GLFW backends compatible with our
+# renderer. The hard floor is Dear ImGui 1.92.8: ImGuiManager.cpp needs
+# `PipelineInfoMain` (introduced in 1.92.4) and
+# `IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE` (introduced in 1.92.8,
+# where the Vulkan backend split combined-image-sampler descriptors into
+# separate sampled-image + sampler descriptors). Docking requires a
+# docking-branch build (IMGUI_HAS_DOCK).
 #
 # VULKANWINDOW_OWNS_IMGUI records whether we created that target ourselves.
 # Only a target this project defined may be installed/exported — a parent's
@@ -129,6 +135,21 @@ if(NOT TARGET imgui)
   target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
 endif()
 
+# A parent-supplied imgui cannot be exported: install(TARGETS) rejects imported
+# and ALIAS targets, and a normal target defined by the parent is not in our
+# export set (CMake fails at generate time, or worse: our install rules would
+# silently skip the imgui archive, headers and link dependency). Fail with an
+# actionable message instead of producing an incomplete package.
+if(VULKANWINDOW_INSTALL AND NOT VULKANWINDOW_OWNS_IMGUI)
+  message(FATAL_ERROR
+    "VULKANWINDOW_INSTALL=ON requires VulkanWindow to build its bundled Dear "
+    "ImGui: an `imgui` target already exists in this build, so the generated "
+    "VulkanWindow package would be incomplete (no imgui archive, headers or "
+    "link dependency). Link the parent's imgui target directly and keep "
+    "VULKANWINDOW_INSTALL=OFF, or remove the parent's imgui target before "
+    "add_subdirectory'ing VulkanWindow so the bundled copy is used.")
+endif()
+
 # Library sources
 set(lib_sources
   source/Application.cpp
@@ -161,7 +182,8 @@ set(lib_sources
 # Static library target. The target is named `VulkanWindow`; consumers
 # should reference it via the namespaced alias `VulkanWindow::VulkanWindow`
 # so the same call site works whether the lib was pulled in via
-# add_subdirectory, FetchContent, or (in the future) an installed package.
+# add_subdirectory, FetchContent, or an installed package
+# (VULKANWINDOW_INSTALL=ON).
 add_library(VulkanWindow STATIC)
 add_library(VulkanWindow::VulkanWindow ALIAS VulkanWindow)
 
@@ -259,7 +281,12 @@ endif()
 # Vulkan, glfw3, and VulkanMemoryAllocator — those must be findable on the
 # consumer's CMAKE_PREFIX_PATH (typically supplied by vcpkg/Conan or system
 # packages). GLFW and VMA are NOT installed by us, since they're third-party
-# submodules with their own versioning.
+# submodules with their own versioning. Dear ImGui is the exception: it has no
+# system-package contract here, so the bundled static library and headers are
+# built from deps/ImGui and installed with this package (the ImGui submodule is
+# therefore still required to produce an install tree). A parent-supplied
+# `imgui` target is rejected at configure time above, because only a target
+# this project owns can be exported into the package.
 if(VULKANWINDOW_INSTALL)
   include(GNUInstallDirs)
   include(CMakePackageConfigHelpers)
@@ -274,11 +301,10 @@ if(VULKANWINDOW_INSTALL)
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VulkanWindow)
 
   # imgui is a separate target (it has its own headers) but lives in the same
-  # export set so a single find_package call brings both in. Only when this
-  # project created it, though: install(TARGETS) rejects an imported or ALIAS
-  # target, and a parent-supplied imgui belongs to the parent (it either has
-  # its own install rules or came from find_package), so it is not ours to
-  # re-export.
+  # export set so a single find_package call brings both in. With INSTALL=ON the
+  # configure-time guard above has already established that we own the target
+  # (a parent-supplied imgui would make the package incomplete), so this is the
+  # bundled target this project defined and is ours to export.
   if(VULKANWINDOW_OWNS_IMGUI)
     install(TARGETS imgui
       EXPORT VulkanWindowTargets

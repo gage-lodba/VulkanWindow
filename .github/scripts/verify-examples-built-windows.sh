@@ -12,8 +12,9 @@
 #
 # Usage: verify-examples-built-windows.sh <build-dir>
 #
-# Plain POSIX sh, invoked with `sh` so it needs no execute bit — which git does
-# not preserve reliably through a Windows checkout.
+# Plain POSIX sh so it is equally runnable with `bash` (what the windows job now
+# invokes explicitly, matching the other jobs) or `sh` — and it needs no execute
+# bit, which git does not preserve reliably through a Windows checkout.
 
 set -eu
 
