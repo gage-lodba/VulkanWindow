@@ -179,9 +179,14 @@ jobs:
         # ccache so unchanged deps (GLFW/ImGui/VMA) aren't recompiled each run.
         # Tests are built here (this is the only job that runs them) — doctest is
         # fetched via FetchContent.
+        #
+        # Warnings-as-errors is enabled: the curated strict warning set (see the
+        # vulkanwindow_apply_project_warnings helper in CMakeLists.txt) must stay
+        # clean on the CI toolchain, and a new warning is a red build, not noise.
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
             -DVULKANWINDOW_BUILD_TESTS=ON \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
@@ -346,6 +351,11 @@ jobs:
         # The dependency configs are found through CMAKE_PREFIX_PATH, which is
         # also where this project installs to, so the consumer resolves glfw3 and
         # VMA out of the same scratch prefix the library lives in.
+        #
+        # Warnings-as-errors is enabled here too: the install configuration
+        # compiles the same target set with system dependency headers, and a
+        # warning that only appears in this configuration should also be a red
+        # build.
         run: |
           set -euo pipefail
 
@@ -354,6 +364,7 @@ jobs:
             -DVULKANWINDOW_INSTALL=ON \
             -DVULKANWINDOW_BUILD_DEMO=OFF \
             -DVULKANWINDOW_BUILD_EXAMPLES=OFF \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_PREFIX_PATH="$PREFIX" \
             -DCMAKE_INSTALL_PREFIX="$PREFIX" \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
@@ -381,8 +392,9 @@ jobs:
   smoke:
     name: Smoke test (lavapipe + validation)
     runs-on: ubuntu-latest
-    # Guards against a hang burning the 6-hour default. Generous:
-    # Debug build plus 120 frames x 3 binaries under lavapipe.
+    # Guards against a hang burning the 6-hour default. Generous: two Debug
+    # builds (normal smoke + best-practices), plus 120/40-frame runs under
+    # lavapipe, ctest-style validation checks and the recreation binary.
     timeout-minutes: 30
 
     steps:
@@ -414,10 +426,12 @@ jobs:
         # validation (see VulkanContext / VulkanRenderer). Tests are built here
         # too so the swapchain-recreation regression binary can be smoke-run
         # (doctest is fetched via FetchContent). ccache skips recompiling
-        # unchanged deps across runs.
+        # unchanged deps across runs. Warnings-as-errors keeps the strict
+        # warning set clean in the Debug configuration as well.
         run: |
           cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
             -DVULKANWINDOW_BUILD_TESTS=ON \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
       - name: Build
@@ -480,6 +494,158 @@ jobs:
           run_smoke ./build-debug/tests/VulkanWindowSwapchainRecreation 40 "recreation smoke OK"
           echo "Smoke test passed: demo + 2 examples + swapchain-recreation regression, validation active, no errors."
 
+      - name: Best-practices validation gate
+        # A second Debug build with VULKANWINDOW_BEST_PRACTICES=ON: the Khronos
+        # best-practices checks run in addition to the normal validation/
+        # synchronization validation, so regressions like "this small object
+        # should be sub-allocated" become CI failures instead of log noise.
+        #
+        # Two known warning classes are allowlisted (see
+        # .github/scripts/check-best-practices-output.sh); any other validator
+        # output — warning or error — fails the job:
+        #   1. the vendored Dear ImGui Vulkan backend asks VMA for small
+        #      dedicated allocations, which the layer reports as best-practices
+        #      "should be sub-allocated" warnings (upstream ImGui limitation);
+        #   2. VK_SUBOPTIMAL_KHR present warnings while the recreation test
+        #      deliberately resizes the window (handled by immediate swap-chain
+        #      recreation, so only a couple appear and the log cleans up).
+        run: |
+          set -euo pipefail
+
+          LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
+          if [ -z "$LVP" ]; then
+            echo "::error::lavapipe ICD not found"
+            exit 1
+          fi
+          export VK_ICD_FILENAMES="$LVP" VK_DRIVER_FILES="$LVP"
+          echo "lavapipe ICD: $LVP"
+
+          ls /usr/share/vulkan/explicit_layer.d/ | grep -qi validation \
+            || { echo "::error::validation layer manifest not installed"; exit 1; }
+
+          # Tests are built so the swap-chain-recreation binary can run under the
+          # best-practices checks too; examples are irrelevant here and skipped
+          # to keep the job fast.
+          cmake -B build-bp -DCMAKE_BUILD_TYPE=Debug \
+            -DVULKANWINDOW_BEST_PRACTICES=ON \
+            -DVULKANWINDOW_BUILD_TESTS=ON \
+            -DVULKANWINDOW_BUILD_EXAMPLES=OFF \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          cmake --build build-bp --config Debug
+
+          export VULKANWINDOW_VALIDATION_ABORT=1
+
+          # run_bp <binary> <frames> <log> [required success marker]
+          run_bp() {
+            local bin="$1" frames="$2" log="$3" marker="${4:-}"
+            if [ ! -x "$bin" ]; then
+              echo "::error::expected best-practices smoke binary missing: $bin"
+              exit 1
+            fi
+            echo "=== best-practices smoke: $bin (${frames} frames) ==="
+            VULKANWINDOW_MAX_FRAMES="$frames" timeout 180 xvfb-run -a "$bin" 2>&1 | tee "$log"
+            if grep -q "running without validation" "$log"; then
+              echo "::error::validation layer was not active for $bin — best-practices gate is meaningless"
+              exit 1
+            fi
+            if [ -n "$marker" ] && ! grep -q "$marker" "$log"; then
+              echo "::error::$bin did not report '$marker'"
+              exit 1
+            fi
+            # The allowlisted warnings are also proof the best-practices checks
+            # actually ran: if the layer/driver combination silently drops
+            # VK_EXT_validation_features, a clean log would otherwise pass this
+            # gate vacuously. Require at least one known warning.
+            if ! grep -q "should be sub-allocated from larger memory blocks" "$log"; then
+              echo "::error::no best-practices warnings observed for $bin — are VK_EXT_validation_features and the best-practices checks active?"
+              exit 1
+            fi
+            bash .github/scripts/check-best-practices-output.sh "$log"
+          }
+
+          run_bp ./build-bp/VulkanWindow 40 build-bp-demo.log
+          run_bp ./build-bp/tests/VulkanWindowSwapchainRecreation 40 \
+            build-bp-recreation.log "recreation smoke OK"
+          echo "Best-practices gate passed: demo + swapchain-recreation regression, only the known vendored-ImGui warnings."
+
+  sanitizers:
+    name: Sanitizers (ASan + UBSan)
+    runs-on: ubuntu-latest
+    # Guards against a hang burning the 6-hour default. Generous: a second Debug
+    # build plus the unit-test suite under ASan+UBSan (lavapipe is slow).
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install build deps
+        # GLFW's X11 + Wayland build deps, the Vulkan loader, and lavapipe as
+        # the software ICD. The unit-test suite is headless (the GPU fixture
+        # creates no window), so no xvfb is needed here. Validation layers are
+        # installed for parity with the other jobs; the sanitizer build runs
+        # the suite without forcing the layer (ASan/UBSan are the gate).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvulkan-dev vulkan-validationlayers \
+            mesa-vulkan-drivers \
+            xorg-dev libxkbcommon-dev \
+            libwayland-dev libwayland-bin wayland-protocols
+
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2.23
+        with:
+          key: ${{ github.job }}
+
+      - name: Configure (Debug + ASan + UBSan)
+        # -D_GLIBCXX_ASSERTIONS adds libstdc++ bounds/iterator checks alongside
+        # the sanitizers. ASan leak detection is disabled at run time (see the
+        # next step): the RADV/lavapipe driver allocations are not project
+        # leaks. Everything else halts on the first report.
+        run: |
+          cmake -B build-sanitize -DCMAKE_BUILD_TYPE=Debug \
+            -DVULKANWINDOW_BUILD_TESTS=ON \
+            -DVULKANWINDOW_BUILD_EXAMPLES=OFF \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
+            -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -D_GLIBCXX_ASSERTIONS' \
+            -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined' \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build-sanitize --config Debug
+
+      - name: Run unit tests under ASan + UBSan
+        # detect_leaks=0 is deliberate: the Vulkan driver (lavapipe here, RADV
+        # locally) keeps process-lifetime allocations that LeakSanitizer reports
+        # as leaks; they are not allocations made by this project. Memory errors,
+        # use-after-free, out-of-bounds, and every UBSan report still halt.
+        # For leak checking, run locally with detect_leaks=1 against your own app
+        # and inspect only stacks rooted in this project (see README).
+        run: |
+          set -euo pipefail
+
+          LVP="$(ls /usr/share/vulkan/icd.d/lvp_icd*.json 2>/dev/null | head -n1 || true)"
+          if [ -z "$LVP" ]; then
+            echo "::error::lavapipe ICD not found — GPU-resource tests would skip"
+            exit 1
+          fi
+          export VK_ICD_FILENAMES="$LVP" VK_DRIVER_FILES="$LVP"
+          export ASAN_OPTIONS=detect_leaks=0:halt_on_error=1
+          export UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1
+
+          ctest --test-dir build-sanitize --output-on-failure -V 2>&1 | tee sanitizer-ctest.log
+          grep -q "VulkanTestFixture: context ready" sanitizer-ctest.log \
+            || { echo "::error::GPU-resource tests did not run under sanitizers (fixture skipped)"; exit 1; }
+          if grep -qE "ERROR: AddressSanitizer|runtime error:|SUMMARY: (AddressSanitizer|UndefinedBehaviorSanitizer)" sanitizer-ctest.log; then
+            echo "::error::sanitizer reported an issue during the unit tests"
+            grep -nE "ERROR: AddressSanitizer|runtime error:|SUMMARY: (AddressSanitizer|UndefinedBehaviorSanitizer)" sanitizer-ctest.log | head -20
+            exit 1
+          fi
+
+          bash .github/scripts/doctest-summary.sh sanitizer-ctest.log 75
+
   macos:
     name: Build (macOS / MoltenVK)
     runs-on: macos-latest
@@ -509,8 +675,13 @@ jobs:
         # Point find_package(Vulkan) at the Homebrew prefix for the loader +
         # headers. If FindVulkan ever fails to locate them, pin explicitly with
         # -DVulkan_INCLUDE_DIR / -DVulkan_LIBRARY instead.
+        #
+        # Warnings-as-errors is enabled for parity with the Linux jobs; the
+        # curated warning set is the same for AppleClang (see
+        # vulkanwindow_apply_project_warnings in CMakeLists.txt).
         run: |
           cmake -B build -DCMAKE_BUILD_TYPE=Release \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)"
 
       - name: Build
@@ -553,10 +724,12 @@ jobs:
         # Debug build compiles in VK_LAYER_KHRONOS_validation + synchronization
         # validation (see VulkanContext / VulkanRenderer). Tests are built here
         # too so the swapchain-recreation regression binary can be smoke-run
-        # (doctest is fetched via FetchContent).
+        # (doctest is fetched via FetchContent). Warnings-as-errors is enabled
+        # so the strict warning set is also enforced against AppleClang.
         run: |
           cmake -B build-debug -DCMAKE_BUILD_TYPE=Debug \
             -DVULKANWINDOW_BUILD_TESTS=ON \
+            -DVULKANWINDOW_WARNINGS_AS_ERRORS=ON \
             -DCMAKE_PREFIX_PATH="$(brew --prefix)"
 
       - name: Build
@@ -655,7 +828,7 @@ jobs:
     # Guards against a hang burning the 6-hour default. Generous:
     # Artifact download, asset staging and upload.
     timeout-minutes: 15
-    needs: [windows, linux, install-check, smoke, macos, macos-smoke]
+    needs: [windows, linux, install-check, smoke, sanitizers, macos, macos-smoke]
     permissions:
       contents: write
 

@@ -51,6 +51,64 @@ option(VULKANWINDOW_BUILD_TESTS
 option(VULKANWINDOW_INSTALL
   "Generate install rules. Requires find_package(glfw3, VulkanMemoryAllocator); Dear ImGui is still built from deps/ImGui."
   OFF)
+# Turns the project's own strict warning set (see
+# vulkanwindow_apply_project_warnings below) into hard errors: -Werror with
+# GCC/Clang, /WX with MSVC. OFF by default so a plain checkout builds on a
+# newer compiler without forcing unrelated warning churn; CI enables it.
+option(VULKANWINDOW_WARNINGS_AS_ERRORS
+  "Treat the project's own compiler warnings (strict warning set) as errors"
+  OFF)
+
+# ---- Project warning / language policy -------------------------------------
+#
+# Applied to every target this project defines — library, demo, examples,
+# tests — and to nothing else:
+#   * PRIVATE compile options, so consumers of VulkanWindow::VulkanWindow do
+#     not inherit warning flags or -Werror;
+#   * third-party code (deps/GLFW, deps/ImGui, deps/VulkanMemoryAllocator) is
+#     not passed through this helper, and the bundled ImGui include
+#     directories are marked SYSTEM, so third-party headers included from our
+#     translation units don't emit warnings under our strict set;
+#   * CXX_EXTENSIONS OFF keeps the project on strict ISO C++20
+#     (-std=c++20, not gnu++20).
+function(vulkanwindow_apply_project_warnings target)
+  # Strict ISO C++20 for the project's own targets: -std=c++20, never gnu++20
+  # (CXX_EXTENSIONS OFF). CXX_STANDARD is stated explicitly so the compiler
+  # flag is emitted deterministically instead of depending on the compiler's
+  # default standard, and REQUIRED so an old toolchain fails loudly.
+  set_target_properties(${target} PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+
+  if(MSVC)
+    # /W4 is the baseline warning level; /WX is the opt-in error upgrade.
+    target_compile_options(${target} PRIVATE /W4)
+    if(VULKANWINDOW_WARNINGS_AS_ERRORS)
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
+  else()
+    target_compile_options(${target} PRIVATE
+      # Baseline.
+      -Wall
+      -Wextra
+      -Wpedantic
+      # Curated strict set: conversions, casts, object lifetime, formatting,
+      # and switch/override mistakes that a C++20 scaffold should not ship.
+      -Wconversion
+      -Wsign-conversion
+      -Wold-style-cast
+      -Wnon-virtual-dtor
+      -Wcast-align
+      -Wnull-dereference
+      -Wformat=2
+      -Wimplicit-fallthrough
+      -Woverloaded-virtual)
+    if(VULKANWINDOW_WARNINGS_AS_ERRORS)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
+  endif()
+endfunction()
 
 # Vulkan
 find_package(Vulkan REQUIRED)
@@ -123,7 +181,13 @@ if(NOT TARGET imgui)
     # without reaching into the nested submodule path themselves.
     deps/ImGui/misc/cpp/imgui_stdlib.cpp
     deps/ImGui/misc/cpp/imgui_stdlib.h)
-  target_include_directories(imgui PUBLIC
+  # SYSTEM: the bundled ImGui is third-party code. Marking its include dirs as
+  # system means our strict warning set (in particular -Wold-style-cast and the
+  # conversion warnings) is not applied to the ImGui headers that our own
+  # translation units include; diagnostics from our TUs stay actionable.
+  # This is also exported to consumers through the build/install interfaces,
+  # which is desirable for the same reason.
+  target_include_directories(imgui SYSTEM PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/backends>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/misc/cpp>
@@ -218,12 +282,9 @@ target_link_libraries(VulkanWindow PUBLIC
 # without us forcing CMAKE_CXX_STANDARD on the parent project.
 target_compile_features(VulkanWindow PUBLIC cxx_std_20)
 
-# Compiler warnings
-if(MSVC)
-  target_compile_options(VulkanWindow PRIVATE /W4)
-else()
-  target_compile_options(VulkanWindow PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# Strict project warnings + optional warnings-as-errors (see the helper above).
+# PRIVATE, so nothing here leaks into consumers of VulkanWindow::VulkanWindow.
+vulkanwindow_apply_project_warnings(VulkanWindow)
 
 # Optional best-practices validation (read by VulkanRenderer.h to enable
 # VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT in Debug builds).
@@ -238,6 +299,7 @@ if(VULKANWINDOW_BUILD_DEMO)
   add_executable(VulkanWindowDemo source/main.cpp)
   set_target_properties(VulkanWindowDemo PROPERTIES OUTPUT_NAME VulkanWindow)
   target_link_libraries(VulkanWindowDemo PRIVATE VulkanWindow::VulkanWindow)
+  vulkanwindow_apply_project_warnings(VulkanWindowDemo)
 
   # Hide console window in release builds on Windows
   if(WIN32)
@@ -254,6 +316,15 @@ endif()
 if(VULKANWINDOW_BUILD_EXAMPLES)
   add_subdirectory(examples/triangle)
   add_subdirectory(examples/textured_quad)
+  # The examples' own CMakeLists keep their baseline warning level; apply the
+  # project-wide strict set here (guarded because either example skips itself
+  # when glslc is missing).
+  if(TARGET VulkanWindowTriangle)
+    vulkanwindow_apply_project_warnings(VulkanWindowTriangle)
+  endif()
+  if(TARGET VulkanWindowTexturedQuad)
+    vulkanwindow_apply_project_warnings(VulkanWindowTexturedQuad)
+  endif()
 endif()
 
 # Unit tests (off by default; see VULKANWINDOW_BUILD_TESTS above). enable_testing
@@ -261,6 +332,25 @@ endif()
 if(VULKANWINDOW_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  if(TARGET VulkanWindowTests)
+    vulkanwindow_apply_project_warnings(VulkanWindowTests)
+    # doctest (third-party test framework) uses __COUNTER__ in its macros and
+    # includes <ciso646>, which libstdc++ >= 16 marks with a #warning. Clang >= 22
+    # reports those as -Wc2y-extensions / -W#warnings, which -Werror would turn
+    # into failures from third-party code. Suppress exactly those two diagnostics
+    # on the test target when using an upstream Clang new enough to emit them;
+    # GCC, older Clang, and AppleClang do not. The library/demo/example targets
+    # keep the full strict set.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 22)
+      target_compile_options(VulkanWindowTests PRIVATE
+        -Wno-c2y-extensions
+        "-Wno-#warnings")
+    endif()
+  endif()
+  if(TARGET VulkanWindowSwapchainRecreation)
+    vulkanwindow_apply_project_warnings(VulkanWindowSwapchainRecreation)
+  endif()
 endif()
 
 # ---- Install / export -------------------------------------------------------

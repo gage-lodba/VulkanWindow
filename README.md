@@ -131,8 +131,9 @@ cmake --build build --config Release
 | --- | --- | --- |
 | `VULKANWINDOW_BUILD_DEMO` | `ON` if top-level, else `OFF` | Build the `VulkanWindowDemo` executable. |
 | `VULKANWINDOW_BUILD_EXAMPLES` | `ON` if top-level, else `OFF` | Build the example executables under `examples/`. Needs `glslc` (Vulkan SDK); skipped with a message if absent. |
-| `VULKANWINDOW_BEST_PRACTICES` | `OFF` | In Debug builds, enable `VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT`. |
+| `VULKANWINDOW_BEST_PRACTICES` | `OFF` | In Debug builds, enable `VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT`. CI runs a filtered best-practices gate with this on; see "Validation and best practices". |
 | `VULKANWINDOW_BUILD_TESTS` | `OFF` | Build the unit tests (`tests/`) plus the `VulkanWindowSwapchainRecreation` smoke binary CI runs (it needs a display, so it is not registered with ctest). Fetches doctest via `FetchContent`; needs CMake ≥ 3.18 (for `SOURCE_SUBDIR`) and network access at configure. Run with `ctest --test-dir build` (CMake ≥ 3.20) or `cd build && ctest`. |
+| `VULKANWINDOW_WARNINGS_AS_ERRORS` | `OFF` | Treat the project's own strict warning set as errors: `-Werror` with GCC/Clang, `/WX` with MSVC. Only applies to targets this project defines (never inherited by consumers); CI enables it. See "Validation and best practices". |
 | `VULKANWINDOW_INSTALL` | `OFF` | Emit install/export rules so consumers can `find_package(VulkanWindow)`. Requires `find_package(glfw3 CONFIG)` and `find_package(VulkanMemoryAllocator CONFIG)`; GLFW/VMA come from those packages instead of the vendored submodules, but the bundled Dear ImGui is still built from `deps/ImGui` and installed with the package. A parent-supplied `imgui` target is rejected at configure time (it cannot be exported); see "Using as a library". |
 
 ## Examples
@@ -513,20 +514,110 @@ Application
   callback — see "Application API" for the ordering rules and the Wayland
   caveat. Backend `VkResult` failures are logged to stderr rather than ignored.
 
+## Validation and best practices
+
+The project ships its own enforcement layer so correctness and quality
+regressions show up as red builds rather than code-review trivia.
+
+### Runtime validation (Debug builds)
+
+Debug builds enable the Khronos validation layer
+(`VK_LAYER_KHRONOS_validation`) plus **synchronization validation** through
+`VK_EXT_validation_features` automatically — no extra option needed. Validation
+messages go to stderr; `VULKANWINDOW_VALIDATION_ABORT=1` makes any error-severity
+message abort the process, which is how the smoke jobs turn validation problems
+into job failures. Release builds compile validation out.
+
+`VULKANWINDOW_BEST_PRACTICES=ON` additionally enables
+`VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT` in Debug builds. Two warning
+classes are expected and allowlisted; everything else is fatal:
+
+1. The vendored Dear ImGui Vulkan backend asks VMA for small dedicated
+   buffers/images, which the layer reports as `vkBindBufferMemory`/
+   `vkBindImageMemory` "fully consumed by the buffer/image … should be
+   sub-allocated" warnings — a known upstream ImGui limitation, not this
+   project's allocation behaviour.
+2. The swapchain-recreation smoke test deliberately resizes the window, so
+   presenting during/after a resize can return `VK_SUBOPTIMAL_KHR` and the layer
+   reports it (`vkQueuePresentKHR(): pPresentInfo[0] VK_SUBOPTIMAL_KHR was
+   returned. …`). The renderer handles it by immediately recreating the swap
+   chain, so only a couple appear and the log is clean again; it is not project
+   misuse and is unavoidable while exercising resize.
+
+CI runs the demo and the swapchain-recreation regression with the option on,
+allowlists exactly these two classes
+(`.github/scripts/check-best-practices-output.sh`), and fails on any other
+validator message. Run the same gate locally with:
+
+```bash
+cmake -B build-bp -DCMAKE_BUILD_TYPE=Debug -DVULKANWINDOW_BEST_PRACTICES=ON
+cmake --build build-bp --config Debug
+VULKANWINDOW_MAX_FRAMES=120 VULKANWINDOW_VALIDATION_ABORT=1 \
+  ./build-bp/VulkanWindow 2>&1 | tee bp.log
+bash .github/scripts/check-best-practices-output.sh bp.log
+```
+
+### Sanitizers (ASan + UBSan)
+
+CI runs the unit tests in a Debug build with AddressSanitizer,
+UndefinedBehaviorSanitizer, and libstdc++ assertions:
+
+```bash
+cmake -B build-san -DCMAKE_BUILD_TYPE=Debug -DVULKANWINDOW_BUILD_TESTS=ON \
+  -DCMAKE_CXX_FLAGS='-fsanitize=address,undefined -fno-omit-frame-pointer -D_GLIBCXX_ASSERTIONS' \
+  -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+cmake --build build-san --config Debug
+ASAN_OPTIONS=detect_leaks=0:halt_on_error=1 \
+UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1 \
+  ctest --test-dir build-san --output-on-failure
+```
+
+`detect_leaks=0` is deliberate in CI: the Vulkan driver (lavapipe on the runner,
+RADV locally) keeps process-lifetime allocations that LeakSanitizer attributes to
+the test process; they are not allocations made by this library. Memory errors,
+use-after-free, out-of-bounds, and every UBSan report still halt. For local leak
+checking, run with `ASAN_OPTIONS=detect_leaks=1` and inspect only reports whose
+stack includes this project's `source/` (driver-owned allocations are expected).
+
+### Compiler warnings and strict C++20
+
+Every target this project defines (library, demo, examples, tests) is compiled as
+strict ISO C++20 (`-std=c++20`, `CXX_EXTENSIONS OFF`) with
+`-Wall -Wextra -Wpedantic` plus a curated strict set:
+`-Wconversion -Wsign-conversion -Wold-style-cast -Wnon-virtual-dtor -Wcast-align
+-Wnull-dereference -Wformat=2 -Wimplicit-fallthrough -Woverloaded-virtual`.
+Those options are `PRIVATE`: consumers never inherit them or `-Werror`.
+`-DVULKANWINDOW_WARNINGS_AS_ERRORS=ON` promotes them to errors (`-Werror`; `/WX`
+on MSVC), which is what CI does. Third-party code is exempt — the bundled ImGui
+include directories are marked `SYSTEM`, so vendored headers don't emit
+warnings into project translation units.
+
+### Static gates
+
+CI also runs `clang-format-18 --dry-run --Werror` over `source/`, `examples/` and
+`tests/` (pinned so formatting doesn't drift with runner images), `clang-tidy`
+(LLVM 18 on the runner, `-warnings-as-errors='*'`) over the library sources, and
+shellcheck over the scripts in `.github/scripts/`. The CMake options table above
+is the configuration surface for the options mentioned here.
+
 ## CI
 
-GitHub Actions runs seven jobs. Release configurations are built on
-`windows-latest`, `ubuntu-latest`, and `macos-latest` (the macOS build compiles
+GitHub Actions runs eight jobs — `windows`, `linux`, `install-check`, `smoke`,
+`sanitizers`, `macos`, `macos-smoke`, and `release`. Release configurations are
+built on `windows-latest`, `ubuntu-latest`, and `macos-latest` (the macOS build compiles
 the `VK_KHR_portability_*` paths; the macOS smoke job then runs against the
 Homebrew Vulkan loader + MoltenVK). The Linux job is the gate for `clang-format`
 (pinned to `clang-format-18`, `--Werror`), `clang-tidy` (with
 `-warnings-as-errors='*'`), shellcheck over the extracted CI scripts, and the
 **unit tests** (`ctest`, with Mesa **lavapipe** as the ICD and the Khronos
-validation layer forced on so invalid test-side Vulkan usage fails the job). An
-`install-check` job configures with `-DVULKANWINDOW_INSTALL=ON`, installs the
-package, and builds/runs a `find_package(VulkanWindow CONFIG REQUIRED)` consumer
-(via `.github/scripts/verify-install-consumer.sh`), covering the exported header
-set, package files, and every installed public header. Binaries are uploaded as
+validation layer forced on so invalid test-side Vulkan usage fails the job).
+Warnings-as-errors is enabled in the Linux and macOS build configurations (and
+the sanitizer build), so a new warning fails CI rather than scrolling past; the
+Windows job keeps the `/W4` baseline. An `install-check` job configures with
+`-DVULKANWINDOW_INSTALL=ON`, installs the package, and builds/runs a
+`find_package(VulkanWindow CONFIG REQUIRED)` consumer (via
+`.github/scripts/verify-install-consumer.sh`), covering the exported header set,
+package files, and every installed public header. Binaries are uploaded as
 workflow artifacts on every run — the workflow triggers on pushes to `main` and
 `v*` tags, plus pull requests touching the source tree, CI scripts, build files,
 lint/format configs, or submodule pins. A GitHub Release is published only when
@@ -546,15 +637,25 @@ none is present; the Linux CI runner installs Mesa **lavapipe** (software Vulkan
 and routes the loader to it via `VK_ICD_FILENAMES`. They complement the smoke
 tests, which exercise the full application GPU path.
 
-Two **smoke-test** jobs build a Debug configuration (validation layers and
+The two **smoke-test** jobs build a Debug configuration (validation layers and
 synchronization validation compiled in, unit tests enabled) and run the demo,
 both examples, and the `VulkanWindowSwapchainRecreation` regression test
 (present-mode switches at frames 10/20/30, asserting the rebuild flags) headlessly
 with validation errors made fatal: one on Linux under Mesa **lavapipe** (software
-Vulkan) inside `xvfb`, one on macOS under **MoltenVK**. This catches runtime
-regressions — invalid API usage, synchronization hazards, swap-chain-recreation
-crashes — that compile and lint cleanly. The release job is gated on both smoke
-jobs and on the build/install jobs.
+Vulkan) inside `xvfb`, one on macOS under **MoltenVK**. The Linux smoke job also
+builds a second Debug configuration with `VULKANWINDOW_BEST_PRACTICES=ON` and runs
+the demo plus the recreation test through the filtered best-practices gate
+described above. This catches runtime regressions — invalid API usage,
+synchronization hazards, swap-chain-recreation crashes, and new best-practices
+findings — that compile and lint cleanly.
+
+The `sanitizers` job builds Debug with ASan + UBSan and `_GLIBCXX_ASSERTIONS`,
+runs the unit-test suite under lavapipe with `detect_leaks=0` and halt-on-error,
+and fails on any sanitizer report (see "Sanitizers (ASan + UBSan)" above for the
+local command and the leak-detection policy).
+
+The release job is gated on both smoke jobs, the sanitizer job, and the
+build/install jobs.
 
 ### Headless / CI environment variables
 
