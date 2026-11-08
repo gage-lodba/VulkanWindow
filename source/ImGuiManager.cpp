@@ -5,15 +5,33 @@
 #include <imgui_impl_vulkan.h>
 
 #include <algorithm>
+#include <cstdio>
 #include <stdexcept>
 
 #include "VulkanUtils.h"  // srgbToLinear
 
-// PipelineInfoMain was introduced 2025-09-26 and shipped in Dear ImGui v1.92.4.
-// Earlier releases use flat RenderPass/Subpass/MSAASamples fields on
-// ImGui_ImplVulkan_InitInfo and won't compile against this manager.
-static_assert(IMGUI_VERSION_NUM >= 19240,
-              "Dear ImGui >= 1.92.4 is required (PipelineInfoMain).");
+// PipelineInfoMain was introduced 2025-09-26 and shipped in Dear ImGui v1.92.4,
+// but the backend-owned descriptor pool sizing below also uses
+// IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE, which only exists from
+// v1.92.8. Require the higher version so both features are available.
+static_assert(IMGUI_VERSION_NUM >= 19280,
+              "Dear ImGui >= 1.92.8 is required "
+              "(IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE)");
+
+namespace {
+
+// Non-throwing VkResult logger for the ImGui Vulkan backend. The backend calls
+// it from its internal checks (descriptor-pool/command-buffer creation, etc.),
+// so it must not throw; report failures on stderr instead of silently ignoring
+// them (which is what the previous nullptr handler did).
+void logImGuiVulkanResult(VkResult result) {
+  if (result != VK_SUCCESS) {
+    std::fprintf(stderr, "ImGui Vulkan backend: VkResult %d\n",
+                 static_cast<int>(result));
+  }
+}
+
+}  // namespace
 
 ImGuiManager::ImGuiManager(
     GLFWwindow *window, uint32_t apiVersion, VkInstance instance,
@@ -61,15 +79,13 @@ ImGuiManager::ImGuiManager(
     // VULKANWINDOW_VALIDATION_ABORT is set. Upstream: ocornut/imgui#9496.
     //
     // An app that wants multi-viewport back (e.g. after patching or upgrading
-    // the backend) must set the flag before finalizeInit() runs the backends —
-    // from its style callback, which finalizeInit() invokes first. ImGui's GLFW
-    // backend only advertises ImGuiBackendFlags_PlatformHasViewports if the
-    // flag is already set when ImGui_ImplGlfw_InitForVulkan() is called, so
-    // setting it after init is too late: the flag lands on the context but the
-    // viewport plumbing is never registered.
+    // the backend) can set the flag from its style callback: finalizeInit()
+    // applies the style before it initialises the backends, so the flag is in
+    // place before the first frame.
 #endif
 
     setupStyle();
+    applyFontCallbackIfNeeded();
   } catch (...) {
     if (contextCreated) ImGui::DestroyContext();
     throw;
@@ -124,20 +140,21 @@ void ImGuiManager::initBackends() {
     initInfo.PipelineInfoForViewports.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
 #endif
     initInfo.Allocator = nullptr;
-    initInfo.CheckVkResultFn = nullptr;
+    initInfo.CheckVkResultFn = logImGuiVulkanResult;
 
     if (!ImGui_ImplVulkan_Init(&initInfo)) {
       throw std::runtime_error("Failed to initialize ImGui Vulkan backend");
     }
     vulkanInited = true;
 
-    // Load user fonts (if any). With Dear ImGui >= 1.92's dynamic atlas the
-    // Vulkan backend uploads/refreshes the texture lazily each frame, so fonts
-    // can be added here (or later via setFontCallback) with no explicit
+    // Load user fonts (if any) if they aren't loaded for this context yet: a
+    // callback registered before run() was applied immediately by
+    // setFontCallback(), and one inherited from a previous context was applied
+    // by the constructor. With Dear ImGui >= 1.92's dynamic atlas the Vulkan
+    // backend uploads/refreshes the texture lazily each frame, so fonts can be
+    // added here (or later via setFontCallback) with no explicit
     // ImGui_ImplVulkan_CreateFontsTexture call.
-    if (fontCallback) {
-      fontCallback();
-    }
+    applyFontCallbackIfNeeded();
   } catch (...) {
     // ImGui_ImplVulkan_Shutdown destroys the backend-owned descriptor pool, so
     // no separate pool teardown is needed on the failure path.
@@ -147,6 +164,14 @@ void ImGuiManager::initBackends() {
   }
 
   backendsInited = true;
+}
+
+void ImGuiManager::applyFontCallbackIfNeeded() {
+  // Apply at most once per ImGui context: fonts added here persist in the
+  // context's atlas, so replaying the callback would load every font twice.
+  if (fontsApplied || !fontCallback) return;
+  fontCallback();
+  fontsApplied = true;
 }
 
 void ImGuiManager::finalizeInit() {
@@ -227,9 +252,12 @@ void ImGuiManager::setStyleCallback(std::function<void()> callback) {
 void ImGuiManager::setFontCallback(std::function<void()> callback) {
   fontCallback = std::move(callback);
   // Apply immediately; the Vulkan backend re-uploads the atlas on the next
-  // frame (dynamic font atlas, Dear ImGui >= 1.92).
+  // frame (dynamic font atlas, Dear ImGui >= 1.92). Record that this context
+  // has the fonts so initBackends() doesn't replay the callback (which would
+  // load every font twice).
   if (fontCallback) {
     fontCallback();
+    fontsApplied = true;
   }
 }
 

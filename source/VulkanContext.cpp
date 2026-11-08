@@ -3,6 +3,7 @@
 #include <vk_mem_alloc.h>
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -295,8 +296,12 @@ void VulkanContext::createInstance(bool enableBestPracticesValidationArg) {
     createInfo.pNext = nullptr;
   }
 
-  vkCheck(vkCreateInstance(&createInfo, nullptr, &instance),
+  // vkCreateInstance leaves its output undefined on failure; create into a
+  // local and publish only on success so cleanup() never destroys garbage.
+  VkInstance newInstance = VK_NULL_HANDLE;
+  vkCheck(vkCreateInstance(&createInfo, nullptr, &newInstance),
           "Failed to create Vulkan instance");
+  instance = newInstance;
 }
 
 void VulkanContext::setupDebugMessenger() {
@@ -305,13 +310,20 @@ void VulkanContext::setupDebugMessenger() {
   VkDebugUtilsMessengerCreateInfoEXT createInfo{};
   fillDebugMessengerCreateInfo(createInfo);
 
-  vkCheck(createDebugUtilsMessengerEXT(instance, &createInfo, &debugMessenger),
+  // Same failure-path rule as the other creators: publish only on success.
+  VkDebugUtilsMessengerEXT messenger = VK_NULL_HANDLE;
+  vkCheck(createDebugUtilsMessengerEXT(instance, &createInfo, &messenger),
           "Failed to set up debug messenger");
+  debugMessenger = messenger;
 }
 
 void VulkanContext::createSurface(GLFWwindow *window) {
-  vkCheck(glfwCreateWindowSurface(instance, window, nullptr, &surface),
+  // glfwCreateWindowSurface follows the Vulkan convention of leaving its
+  // output undefined on failure; publish only on success.
+  VkSurfaceKHR newSurface = VK_NULL_HANDLE;
+  vkCheck(glfwCreateWindowSurface(instance, window, nullptr, &newSurface),
           "Failed to create window surface");
+  surface = newSurface;
 }
 
 void VulkanContext::pickPhysicalDevice() {
@@ -332,11 +344,18 @@ void VulkanContext::pickPhysicalDevice() {
   // across runs on a given system, making selection reproducible.
   int forcedIndex = -1;
   if (const char *forced = std::getenv("VULKANWINDOW_DEVICE_INDEX");
-      forced && forced[0] != '\0') {
-    try {
-      forcedIndex = std::stoi(forced);
-    } catch (...) {
-      forcedIndex = -1;
+      forced != nullptr && forced[0] != '\0') {
+    // All-or-nothing parse so trailing garbage (e.g. "2x") cannot force a
+    // device by prefix. Non-numeric, negative and out-of-range values fall back
+    // to auto-scoring, as documented.
+    const std::string_view forcedValue(forced);
+    int parsedIndex = 0;
+    const auto [end, error] =
+        std::from_chars(forcedValue.data(),
+                        forcedValue.data() + forcedValue.size(), parsedIndex);
+    if (error == std::errc{} &&
+        end == forcedValue.data() + forcedValue.size()) {
+      forcedIndex = parsedIndex;
     }
   }
 
@@ -514,8 +533,10 @@ void VulkanContext::createLogicalDevice() {
   // enabledLayerCount here triggers a validation warning, so we leave it at the
   // zero-initialized default.
 
-  vkCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &device),
+  VkDevice newDevice = VK_NULL_HANDLE;
+  vkCheck(vkCreateDevice(physicalDevice, &createInfo, nullptr, &newDevice),
           "Failed to create logical device");
+  device = newDevice;
 
   vkGetDeviceQueue(device, graphicsQueueFamily, 0, &graphicsQueue);
   vkGetDeviceQueue(device, presentQueueFamily, 0, &presentQueue);
@@ -534,8 +555,10 @@ void VulkanContext::createAllocator() {
   allocatorInfo.vulkanApiVersion =
       std::min(instanceApiVersion, deviceApiVersion);
 
-  vkCheck(vmaCreateAllocator(&allocatorInfo, &allocator),
+  VmaAllocator newAllocator = nullptr;
+  vkCheck(vmaCreateAllocator(&allocatorInfo, &newAllocator),
           "Failed to create VMA allocator");
+  allocator = newAllocator;
 }
 
 void VulkanContext::createPipelineCache() {
@@ -561,13 +584,17 @@ void VulkanContext::createPipelineCache() {
       physicalDeviceProperties.deviceID,
       physicalDeviceProperties.pipelineCacheUUID,
   };
+  // vkCreatePipelineCache leaves its output undefined on failure, so create
+  // into a local and publish to the member only on success.
+  VkPipelineCache newPipelineCache = VK_NULL_HANDLE;
   if (auto cacheData = store.load(deviceIdentity);
       cacheData.has_value() && !cacheData->empty()) {
     cacheInfo.initialDataSize = cacheData->size();
     cacheInfo.pInitialData = cacheData->data();
 
-    if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &pipelineCache) ==
+    if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &newPipelineCache) ==
         VK_SUCCESS) {
+      pipelineCache = newPipelineCache;
       return;
     }
 
@@ -579,12 +606,14 @@ void VulkanContext::createPipelineCache() {
     cacheInfo.pInitialData = nullptr;
   }
 
-  if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &pipelineCache) !=
+  if (vkCreatePipelineCache(device, &cacheInfo, nullptr, &newPipelineCache) !=
       VK_SUCCESS) {
     std::cerr << "Warning: failed to create pipeline cache; continuing "
                  "without cache.\n";
     pipelineCache = VK_NULL_HANDLE;
+    return;
   }
+  pipelineCache = newPipelineCache;
 }
 
 void VulkanContext::savePipelineCache() const {

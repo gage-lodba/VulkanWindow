@@ -269,8 +269,12 @@ void Swapchain::createImageViews() {
     createInfo.subresourceRange.baseArrayLayer = 0;
     createInfo.subresourceRange.layerCount = 1;
 
-    vkCheck(vkCreateImageView(ctx.device, &createInfo, nullptr, &imageViews[i]),
+    // Create into a local: Vulkan leaves outputs undefined on failure, and
+    // cleanup() must not destroy an indeterminate handle.
+    VkImageView imageView = VK_NULL_HANDLE;
+    vkCheck(vkCreateImageView(ctx.device, &createInfo, nullptr, &imageView),
             "Failed to create swap-chain image view");
+    imageViews[i] = imageView;
   }
 }
 
@@ -355,8 +359,14 @@ void Swapchain::createRenderPass() {
   renderPassInfo.dependencyCount = static_cast<uint32_t>(dependencies.size());
   renderPassInfo.pDependencies = dependencies.data();
 
-  vkCheck(vkCreateRenderPass(ctx.device, &renderPassInfo, nullptr, &renderPass),
-          "Failed to create render pass");
+  // Published only on success: on a failed create the handle is undefined and
+  // the recreate() throw path relies on the member staying null so the old
+  // render pass it extracted is destroyed instead.
+  VkRenderPass newRenderPass = VK_NULL_HANDLE;
+  vkCheck(
+      vkCreateRenderPass(ctx.device, &renderPassInfo, nullptr, &newRenderPass),
+      "Failed to create render pass");
+  renderPass = newRenderPass;
 }
 
 void Swapchain::createFramebuffers() {
@@ -406,9 +416,11 @@ void Swapchain::createFramebuffers() {
     framebufferInfo.layers = 1;
 
     framebuffers.resize(1);
+    VkFramebuffer framebuffer = VK_NULL_HANDLE;
     vkCheck(vkCreateFramebuffer(ctx.device, &framebufferInfo, nullptr,
-                                &framebuffers[0]),
+                                &framebuffer),
             "Failed to create imageless framebuffer");
+    framebuffers[0] = framebuffer;
   } else {
     // Traditional: one framebuffer per swapchain image.
     framebuffers.resize(imageViews.size());
@@ -426,9 +438,11 @@ void Swapchain::createFramebuffers() {
       framebufferInfo.height = extent.height;
       framebufferInfo.layers = 1;
 
+      VkFramebuffer framebuffer = VK_NULL_HANDLE;
       vkCheck(vkCreateFramebuffer(ctx.device, &framebufferInfo, nullptr,
-                                  &framebuffers[i]),
+                                  &framebuffer),
               "Failed to create framebuffer");
+      framebuffers[i] = framebuffer;
     }
   }
 }
@@ -489,9 +503,16 @@ void Swapchain::createDepthResources() {
     VmaAllocationCreateInfo allocCreateInfo{};
     allocCreateInfo.usage = VMA_MEMORY_USAGE_AUTO;
 
+    // vmaCreateImage also leaves its outputs undefined on failure; create
+    // into locals and publish only on success so cleanup() never destroys
+    // garbage handles.
+    VkImage depthImage = VK_NULL_HANDLE;
+    VmaAllocation depthAllocation = VK_NULL_HANDLE;
     vkCheck(vmaCreateImage(ctx.allocator, &imageInfo, &allocCreateInfo,
-                           &depthImages[i], &depthAllocations[i], nullptr),
+                           &depthImage, &depthAllocation, nullptr),
             "Failed to create depth image");
+    depthImages[i] = depthImage;
+    depthAllocations[i] = depthAllocation;
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -504,9 +525,10 @@ void Swapchain::createDepthResources() {
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 1;
 
-    vkCheck(
-        vkCreateImageView(ctx.device, &viewInfo, nullptr, &depthImageViews[i]),
-        "Failed to create depth image view");
+    VkImageView depthView = VK_NULL_HANDLE;
+    vkCheck(vkCreateImageView(ctx.device, &viewInfo, nullptr, &depthView),
+            "Failed to create depth image view");
+    depthImageViews[i] = depthView;
   }
 }
 
