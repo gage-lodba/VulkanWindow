@@ -43,6 +43,9 @@ focus on their own geometry and UI.
 >     those headers.
 >   - `createShaderModule` throws `std::invalid_argument` for a null pointer,
 >     `sizeBytes == 0`, or `sizeBytes % 4 != 0`.
+>   - `createMappedBuffer`, `createDeviceLocalBuffer` and `createTexture2D`
+>     reject zero sizes/dimensions and null pointers with
+>     `std::invalid_argument` before touching Vulkan/VMA.
 >   - `transitionImageLayout` throws `std::invalid_argument` for
 >     `mipLevels == 0` or `aspectMask == 0`.
 >   - `createDescriptorPool` throws `std::invalid_argument` for `maxSets == 0`.
@@ -57,11 +60,15 @@ focus on their own geometry and UI.
 >     app-name namespace and sweeps stale temp files there; the cache path can
 >     therefore change once on fallback setups.
 >
-> **Upgrading from 0.4.0:** `SwapchainRecreateInfo` now lives in
-> `SwapchainRecreateInfo.h` instead of `VulkanRenderer.h`. Consumer code that
-> included the renderer header to name the type from
-> `setSwapchainRecreatedCallback` should include the new header, which no longer
-> pulls in GLFW. Nothing else in the public surface changed.
+> **Upgrading from 0.3.x:** `SwapchainRecreateInfo` lives in
+> `SwapchainRecreateInfo.h` instead of `VulkanRenderer.h` (0.4.0 split it out of
+> the renderer header). Consumer code that included the renderer header to name
+> the type from `setSwapchainRecreatedCallback` should include the new header,
+> which no longer pulls in GLFW. Beyond the additions listed above there are no
+> further public-surface changes; note that `SwapchainRecreateInfo` is an
+> aggregate, so code that constructs it positionally (rather than receiving it
+> from the callback) must be recompiled and account for the new
+> `imguiContextRebuilt` field.
 >
 > **Version history:** release tags through `v0.3.0` all shipped with
 > `PROJECT_VERSION` still at 0.1.0, so `find_package(VulkanWindow <version>)` did
@@ -523,20 +530,22 @@ regressions show up as red builds rather than code-review trivia.
 
 Debug builds enable the Khronos validation layer
 (`VK_LAYER_KHRONOS_validation`) plus **synchronization validation** through
-`VK_EXT_validation_features` automatically — no extra option needed. Validation
-messages go to stderr; `VULKANWINDOW_VALIDATION_ABORT=1` makes any error-severity
-message abort the process, which is how the smoke jobs turn validation problems
-into job failures. Release builds compile validation out.
+`VK_EXT_validation_features` automatically — no extra option needed (if the
+layer is not installed, a warning is printed and the build continues without
+validation). Validation messages go to stderr; `VULKANWINDOW_VALIDATION_ABORT=1`
+makes any error-severity message abort the process, which is how the smoke jobs
+turn validation problems into job failures. Release builds compile validation
+out.
 
 `VULKANWINDOW_BEST_PRACTICES=ON` additionally enables
 `VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT` in Debug builds. Two warning
 classes are expected and allowlisted; everything else is fatal:
 
-1. The vendored Dear ImGui Vulkan backend asks VMA for small dedicated
-   buffers/images, which the layer reports as `vkBindBufferMemory`/
-   `vkBindImageMemory` "fully consumed by the buffer/image … should be
-   sub-allocated" warnings — a known upstream ImGui limitation, not this
-   project's allocation behaviour.
+1. The vendored Dear ImGui Vulkan backend backs each small buffer/image with its
+   own `vkAllocateMemory` call (it does not use VMA), which the layer reports as
+   `vkBindBufferMemory`/`vkBindImageMemory` "fully consumed by the buffer/image …
+   should be sub-allocated" warnings — a known upstream ImGui limitation, not
+   this project's allocation behaviour.
 2. The swapchain-recreation smoke test deliberately resizes the window, so
    presenting during/after a resize can return `VK_SUBOPTIMAL_KHR` and the layer
    reports it (`vkQueuePresentKHR(): pPresentInfo[0] VK_SUBOPTIMAL_KHR was
