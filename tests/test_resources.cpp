@@ -174,6 +174,64 @@ auto makeTestImage(VulkanTestFixture& fx, VkFormat format,
 }  // namespace
 
 // -----------------------------------------------------------------------------
+// Argument guards on the create* helpers
+// -----------------------------------------------------------------------------
+//
+// Every guard here is documented to throw std::invalid_argument and to run
+// before the helper touches VMA or Vulkan. That ordering is what makes these
+// cases runnable on any machine — no ICD, device or allocator is needed — and
+// it is also the contract: a caller must get an actionable exception instead of
+// an undefined-behaviour Vulkan call with a zero-sized buffer/image. If a guard
+// ever moves after the first Vulkan call, these tests start crashing on the
+// null handles instead of silently passing, which is the intended signal.
+
+TEST_CASE("createMappedBuffer rejects a zero size") {
+  CHECK_THROWS_AS((void)vkutil::createMappedBuffer(
+                      VK_NULL_HANDLE, 0, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT),
+                  std::invalid_argument);
+}
+
+TEST_CASE("createDeviceLocalBuffer rejects zero size and null data") {
+  constexpr uint8_t kByte = 0x42;
+  // VkBufferCreateInfo.size must be > 0 (VUID-VkBufferCreateInfo-size-00912).
+  CHECK_THROWS_AS((void)vkutil::createDeviceLocalBuffer(
+                      VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 0, &kByte,
+                      0, VK_BUFFER_USAGE_INDEX_BUFFER_BIT),
+                  std::invalid_argument);
+  // A positive size with no source bytes would make the helper memcpy from
+  // null.
+  CHECK_THROWS_AS((void)vkutil::createDeviceLocalBuffer(
+                      VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE, 0,
+                      nullptr, 4, VK_BUFFER_USAGE_INDEX_BUFFER_BIT),
+                  std::invalid_argument);
+}
+
+TEST_CASE("createTexture2D rejects empty dimensions, data and dataSize") {
+  const std::array<uint8_t, 4> kPixel = {0, 0, 0, 255};
+  // VkImageCreateInfo.extent requires every dimension to be > 0
+  // (VUID-VkImageCreateInfo-extent-00944/00945/00946).
+  CHECK_THROWS_AS((void)vkutil::createTexture2D(
+                      VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                      VK_NULL_HANDLE, 0, kPixel.data(), kPixel.size(), 0, 1),
+                  std::invalid_argument);
+  CHECK_THROWS_AS((void)vkutil::createTexture2D(
+                      VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                      VK_NULL_HANDLE, 0, kPixel.data(), kPixel.size(), 1, 0),
+                  std::invalid_argument);
+  // An empty upload has no level-0 texels to copy.
+  CHECK_THROWS_AS((void)vkutil::createTexture2D(VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                                VK_NULL_HANDLE, VK_NULL_HANDLE,
+                                                0, kPixel.data(), 0, 1, 1),
+                  std::invalid_argument);
+  // A positive upload size with no source pixels would make the helper memcpy
+  // from null.
+  CHECK_THROWS_AS((void)vkutil::createTexture2D(
+                      VK_NULL_HANDLE, VK_NULL_HANDLE, VK_NULL_HANDLE,
+                      VK_NULL_HANDLE, 0, nullptr, kPixel.size(), 1, 1),
+                  std::invalid_argument);
+}
+
+// -----------------------------------------------------------------------------
 // createMappedBuffer / destroyBuffer
 // -----------------------------------------------------------------------------
 
@@ -252,6 +310,15 @@ TEST_CASE("flushMapped is a no-op on an empty or destroyed buffer") {
 // -----------------------------------------------------------------------------
 // createDeviceLocalBuffer
 // -----------------------------------------------------------------------------
+//
+// Coverage limit for the exception-safety fix in this helper (staging buffer
+// destroyed if the staging flush throws): provoking vmaFlushAllocation failure
+// would need fault injection into VMA/ the driver. A mock allocator would test
+// the mock, not the helper, and the real failure is not reachable through the
+// public API on a healthy driver — so this path is reviewed by inspection in
+// source/VulkanResources.cpp (staging is owned outside the try block and is
+// destroyed by the catch handler) instead of asserted here. The happy path and
+// the argument guards are covered below/above.
 
 TEST_CASE("createDeviceLocalBuffer uploads the exact bytes to device memory") {
   VulkanTestFixture fx;
@@ -357,6 +424,14 @@ TEST_CASE("createSampler with nearest filtering and clamp addressing") {
 // -----------------------------------------------------------------------------
 // beginSingleTimeCommands / endSingleTimeCommands
 // -----------------------------------------------------------------------------
+//
+// Coverage limit for the begin-failure exception-safety fix (the freshly
+// allocated command buffer is freed before the error is rethrown): forcing
+// vkBeginCommandBuffer to fail through the public API would require invalid
+// usage, and a fault-injection loader would only test the injection harness.
+// The happy path is covered here; the failure ordering is reviewed by
+// inspection in source/VulkanResources.cpp. The helper's argument-free contract
+// (no null-guard on device/pool) is unchanged.
 
 TEST_CASE("beginSingleTimeCommands and endSingleTimeCommands round-trip") {
   VulkanTestFixture fx;

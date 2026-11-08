@@ -20,8 +20,11 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(doctest INTERFACE)
 add_library(doctest::doctest ALIAS doctest)
-# The header is at <doctest/doctest.h> relative to the repo root.
-target_include_directories(doctest INTERFACE ${doctest_SOURCE_DIR})
+# The header is at <doctest/doctest.h> relative to the repo root. SYSTEM: doctest
+# is third-party code, so its headers must not leak diagnostics into our TUs
+# under the project's strict warning set (-Wall -Wextra -Wpedantic + curated
+# strict flags + -Werror). Our own test sources keep the full strict set.
+target_include_directories(doctest SYSTEM INTERFACE ${doctest_SOURCE_DIR})
 
 add_executable(VulkanWindowTests
   test_main.cpp

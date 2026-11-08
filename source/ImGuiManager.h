@@ -1,5 +1,7 @@
 #pragma once
 
+// GLFW must not pull in the OpenGL headers; this project only uses Vulkan.
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
 
@@ -29,9 +31,12 @@ class ImGuiManager {
                std::function<void()> fontCallback = {});
   ~ImGuiManager();
 
-  // Delete copy constructor and assignment operator
+  // Non-copyable, non-movable: the manager owns process-global ImGui state
+  // (the ImGui context and backend registrations) that must not be duplicated.
   ImGuiManager(const ImGuiManager &) = delete;
   auto operator=(const ImGuiManager &) -> ImGuiManager & = delete;
+  ImGuiManager(ImGuiManager &&) = delete;
+  auto operator=(ImGuiManager &&) -> ImGuiManager & = delete;
 
   void newFrame();
   void render(VkCommandBuffer commandBuffer);
@@ -44,9 +49,8 @@ class ImGuiManager {
   /// vendored ImGui Vulkan backend emits a validation error on this path
   /// (ocornut/imgui#9496). Re-enable it by setting the flag from a style
   /// callback: the style is applied by finalizeInit() *before* the backends
-  /// initialise, which is what makes it take effect (ImGui's GLFW backend
-  /// latches ImGuiBackendFlags_PlatformHasViewports at init). Note it stays
-  /// off on Wayland regardless — see deps/ImGui/backends/imgui_impl_glfw.cpp.
+  /// initialise, so the flag is set before the first frame. Note it stays off
+  /// on Wayland regardless — see deps/ImGui/backends/imgui_impl_glfw.cpp.
   void renderPlatformWindows();
 
   /// Inform the Vulkan backend that the swap-chain's min image count

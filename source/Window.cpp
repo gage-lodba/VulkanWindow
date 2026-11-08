@@ -2,6 +2,7 @@
 
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 Window::Window(int width, int height, std::string_view title, bool resizable) {
   initWindow(width, height, title, resizable);

@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <stdexcept>
 #include <string_view>
+#include <utility>
 
 Application::Application() : Application(DEFAULT_WIDTH, DEFAULT_HEIGHT) {}
 

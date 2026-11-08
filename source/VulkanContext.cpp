@@ -328,14 +328,18 @@ void VulkanContext::createSurface(GLFWwindow *window) {
 
 void VulkanContext::pickPhysicalDevice() {
   uint32_t deviceCount = 0;
-  vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr);
+  // Both enumeration calls write deviceCount: on failure its contents (and the
+  // device list) are undefined, so check the results before trusting either.
+  vkCheck(vkEnumeratePhysicalDevices(instance, &deviceCount, nullptr),
+          "Failed to enumerate physical devices");
 
   if (deviceCount == 0) {
     throw std::runtime_error("Failed to find GPUs with Vulkan support");
   }
 
   std::vector<VkPhysicalDevice> devices(deviceCount);
-  vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data());
+  vkCheck(vkEnumeratePhysicalDevices(instance, &deviceCount, devices.data()),
+          "Failed to enumerate physical devices");
 
   // Score all suitable devices and pick the best one. An optional
   // VULKANWINDOW_DEVICE_INDEX env var forces a specific enumeration index
@@ -360,8 +364,11 @@ void VulkanContext::pickPhysicalDevice() {
   }
 
   if (forcedIndex >= 0 && std::cmp_less(forcedIndex, devices.size())) {
-    if (isDeviceSuitable(devices[forcedIndex])) {
-      physicalDevice = devices[forcedIndex];
+    // The comparison above guarantees forcedIndex is non-negative, so the cast
+    // to the vector's size type cannot change the value.
+    const auto forcedDeviceIndex = static_cast<size_t>(forcedIndex);
+    if (isDeviceSuitable(devices[forcedDeviceIndex])) {
+      physicalDevice = devices[forcedDeviceIndex];
     }
   } else {
     int bestScore = -1;
@@ -580,9 +587,9 @@ void VulkanContext::createPipelineCache() {
   // The device fingerprint this cache is valid for. Inlined at its single call
   // site rather than kept as a private helper.
   const vkutil::PipelineCacheIdentity deviceIdentity{
-      physicalDeviceProperties.vendorID,
-      physicalDeviceProperties.deviceID,
-      physicalDeviceProperties.pipelineCacheUUID,
+      .vendorID = physicalDeviceProperties.vendorID,
+      .deviceID = physicalDeviceProperties.deviceID,
+      .pipelineCacheUUID = physicalDeviceProperties.pipelineCacheUUID,
   };
   // vkCreatePipelineCache leaves its output undefined on failure, so create
   // into a local and publish to the member only on success.
@@ -683,6 +690,14 @@ auto VulkanContext::getRequiredExtensions() const -> std::vector<const char *> {
   uint32_t glfwExtensionCount = 0;
   const char **glfwExtensions =
       glfwGetRequiredInstanceExtensions(&glfwExtensionCount);
+  if (glfwExtensions == nullptr) {
+    // GLFW returns null when it cannot determine the platform extensions (for
+    // example if GLFW is not initialised). Formatting a vector from a null
+    // range would be undefined behaviour, so fail loudly instead.
+    throw std::runtime_error(
+        "Failed to query required GLFW instance extensions; is GLFW "
+        "initialized?");
+  }
 
   std::vector<const char *> extensions(glfwExtensions,
                                        glfwExtensions + glfwExtensionCount);
@@ -743,10 +758,11 @@ auto VulkanContext::rateDeviceSuitability(VkPhysicalDevice physDevice) -> int {
   // Cap the heap term so a huge-iGPU heap can't approach the
   // integrated/discrete gap. 64 GiB caps at ~65 000, well below the 900 000 gap
   // above.
+  constexpr VkDeviceSize kBytesPerMiB = VkDeviceSize{1024} * 1024;
   constexpr VkDeviceSize kHeapCapBytes = VkDeviceSize{64} * 1024 * 1024 * 1024;
   const VkDeviceSize cappedHeap =
       std::min(largestDeviceLocalHeap, kHeapCapBytes);
-  score += static_cast<int>(cappedHeap / (1024 * 1024));
+  score += static_cast<int>(cappedHeap / kBytesPerMiB);
 
   // Prefer higher Vulkan API version support
   score += static_cast<int>(VK_API_VERSION_MINOR(props.apiVersion)) * 100;

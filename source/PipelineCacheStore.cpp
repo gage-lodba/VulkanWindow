@@ -1,9 +1,11 @@
 #include "PipelineCacheStore.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <utility>
 
 #if defined(_WIN32)
@@ -32,6 +34,10 @@ constexpr size_t kVendorIDOffset = kHeaderVersionOffset + sizeof(uint32_t);
 constexpr size_t kDeviceIDOffset = kVendorIDOffset + sizeof(uint32_t);
 constexpr size_t kUUIDOffset = kDeviceIDOffset + sizeof(uint32_t);
 constexpr size_t kHeaderSize = kUUIDOffset + VK_UUID_SIZE;
+// The spec's VkPipelineCacheHeaderVersionOne is exactly 32 bytes for
+// VK_PIPELINE_CACHE_HEADER_VERSION_ONE; keep the parsed offsets in lockstep.
+static_assert(kHeaderSize == 32,
+              "pipeline cache header version one is 32 bytes");
 
 template <typename T>
 auto readScalar(std::span<const std::byte> data, size_t offset) -> T {
@@ -253,9 +259,12 @@ auto readFileFully(const fs::path &path)
   const auto size = file.tellg();
   if (size <= 0) return std::nullopt;
 
+  // Explicit pos_type -> size_t/streamsize conversions (a cache file larger
+  // than the address space cannot be loaded on a 32-bit host anyway).
   std::vector<std::byte> data(static_cast<size_t>(size));
   file.seekg(0);
-  file.read(reinterpret_cast<char *>(data.data()), size);
+  file.read(reinterpret_cast<char *>(data.data()),
+            static_cast<std::streamsize>(size));
   if (!file.good()) return std::nullopt;
 
   return data;

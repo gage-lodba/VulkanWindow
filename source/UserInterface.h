@@ -4,7 +4,6 @@
 class UserInterface {
  public:
   UserInterface() noexcept = default;
-  ~UserInterface() = default;
 
   void render();
 

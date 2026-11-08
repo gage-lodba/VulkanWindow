@@ -92,6 +92,9 @@ void sweepStaleTemps(const std::filesystem::path &target,
 
 /// Write `data` to `path` crash-safely: create the parent directory, write to
 /// a PID-suffixed sibling temp file, flush it to disk, then rename over `path`.
+/// The PID suffix makes concurrent *processes* safe; two threads of the same
+/// process racing to write the same path would share a temp name and are not
+/// supported (see PipelineCacheStore's thread-safety note).
 /// A kill mid-write therefore leaves either the old file or the new one, never
 /// a truncated file — which matters because a truncated cache fails the header
 /// check on the next run and silently costs a full pipeline recompile.
@@ -123,6 +126,11 @@ void sweepStaleTemps(const std::filesystem::path &target,
 
 /// Persistence for one pipeline-cache file. Holds no Vulkan handles, so it can
 /// be constructed and exercised without a device.
+///
+/// Thread-safety: load()/save() are not internally synchronized. Call them from
+/// one thread at a time (the scaffold loads during context init and saves
+/// during shutdown); concurrent processes writing the same path are supported
+/// by the PID-suffixed temp-file write.
 class PipelineCacheStore {
  public:
   /// `cacheFile` is the path of the cache blob itself (see

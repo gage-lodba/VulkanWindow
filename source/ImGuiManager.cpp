@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <stdexcept>
+#include <utility>
 
 #include "VulkanUtils.h"  // srgbToLinear
 

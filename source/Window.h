@@ -1,5 +1,7 @@
 #pragma once
 
+// GLFW must not pull in the OpenGL headers; this project only uses Vulkan.
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
 #include <functional>

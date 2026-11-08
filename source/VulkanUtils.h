@@ -2,6 +2,7 @@
 
 #include <vulkan/vulkan.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <vector>
@@ -72,10 +73,20 @@ struct SwapChainSupportDetails {
 
 /// Find a graphics queue family that also supports presenting to `surface`,
 /// preferring a single family that supports both.
+///
+/// `surface` must be a valid VkSurfaceKHR: VK_NULL_HANDLE (or a surface not
+/// supported by `device`) is invalid Vulkan usage for
+/// vkGetPhysicalDeviceSurfaceSupportKHR and is not tolerated here.
 auto findQueueFamilies(VkPhysicalDevice device,
                        VkSurfaceKHR surface) -> QueueFamilyIndices;
 
 /// Query the swap-chain support for a (physical device, surface) pair.
+///
+/// The VkResult of the three surface queries is deliberately not propagated
+/// (the struct is plain data): on failure or for a surface with no presentation
+/// engine, `capabilities` stays zero-initialised and the format/present-mode
+/// vectors are empty. Callers must treat that as "not usable" rather than
+/// assuming the surface supports presentation.
 auto querySwapChainSupport(VkPhysicalDevice device,
                            VkSurfaceKHR surface) -> SwapChainSupportDetails;
 

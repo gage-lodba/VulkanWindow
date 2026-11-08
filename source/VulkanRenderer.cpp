@@ -1,8 +1,10 @@
 #include "VulkanRenderer.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 
 #include "ImGuiManager.h"
 #include "Swapchain.h"
