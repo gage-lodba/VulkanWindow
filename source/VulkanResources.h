@@ -92,11 +92,15 @@ struct Image {
 /// Create a 2D sampled texture from tightly-packed pixel data: a device-local
 /// image, staged upload, transitioned to SHADER_READ_ONLY_OPTIMAL, plus a view.
 /// `data`/`dataSize` is level 0 (`width`×`height` texels of `format`). When
-/// `generateMipmaps` is true a full mip chain is built by linear blits — which
-/// requires `format` to support linear-filter blitting on optimal tiling (it
-/// throws otherwise). A transient command pool is created/destroyed internally
-/// and the upload blocks (vkQueueWaitIdle), so this is for load-time use.
-/// Throws std::runtime_error on failure.
+/// `generateMipmaps` is true a full mip chain is built by linear blits, which
+/// requires `format` on optimal tiling to support ALL of
+/// VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT,
+/// VK_FORMAT_FEATURE_BLIT_SRC_BIT and VK_FORMAT_FEATURE_BLIT_DST_BIT (the same
+/// format is both blit source and destination); it throws std::runtime_error
+/// otherwise. A transient command pool is created/destroyed internally and the
+/// upload blocks (vkQueueWaitIdle), so this is for load-time use.
+/// Throws std::runtime_error on any Vulkan/VMA failure, including a failed
+/// staging-buffer flush.
 ///
 /// Thread-safety: submits on `queue`, which Vulkan requires be externally
 /// synchronized. Call before VulkanRenderer/Application::run() (or while the
@@ -115,7 +119,19 @@ struct Image {
 /// pipeline stages are chosen for the common texture-upload transitions
 /// (UNDEFINED→TRANSFER_DST, TRANSFER_DST→SHADER_READ_ONLY,
 /// UNDEFINED→SHADER_READ_ONLY); other layout pairs fall back to a conservative
-/// ALL_COMMANDS / MEMORY_READ|WRITE barrier. Covers mip levels [0, mipLevels).
+/// ALL_COMMANDS / MEMORY_READ|WRITE barrier. Covers mip levels [0, mipLevels)
+/// of array layer 0.
+///
+/// `oldLayout` must be VK_IMAGE_LAYOUT_UNDEFINED or the image's actual current
+/// layout (Vulkan valid usage). For the two SHADER_READ_ONLY_OPTIMAL
+/// destinations the barrier's destination stage is the fragment shader stage,
+/// which covers the usual sampled-texture upload; sampling from other stages
+/// (e.g. compute or vertex shaders) needs an additional barrier with the
+/// matching stage. `aspectMask` must be valid for the image's format (e.g.
+/// COLOR for colour textures, DEPTH/STENCIL for depth-stencil images).
+///
+/// Throws std::invalid_argument when `mipLevels` is 0 or `aspectMask` is 0,
+/// both of which would produce an invalid VkImageSubresourceRange.
 void transitionImageLayout(
     VkCommandBuffer commandBuffer, VkImage image, VkImageLayout oldLayout,
     VkImageLayout newLayout, uint32_t mipLevels = 1,

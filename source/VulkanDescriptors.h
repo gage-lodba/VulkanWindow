@@ -27,8 +27,10 @@ struct DescriptorBinding {
     std::initializer_list<DescriptorBinding> bindings) -> VkDescriptorSetLayout;
 
 /// Create a descriptor pool sized for `maxSets` sets covering the given pool
-/// sizes (created with FREE_DESCRIPTOR_SET_BIT). Throws on failure; destroy
-/// with vkDestroyDescriptorPool.
+/// sizes (created with FREE_DESCRIPTOR_SET_BIT). Throws std::invalid_argument
+/// when `maxSets` is 0 (Vulkan requires a positive value); throws
+/// std::runtime_error if vkCreateDescriptorPool fails. Destroy with
+/// vkDestroyDescriptorPool.
 [[nodiscard]] auto createDescriptorPool(
     VkDevice device, std::initializer_list<VkDescriptorPoolSize> poolSizes,
     uint32_t maxSets) -> VkDescriptorPool;

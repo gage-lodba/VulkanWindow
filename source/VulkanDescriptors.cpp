@@ -1,5 +1,6 @@
 #include "VulkanDescriptors.h"
 
+#include <stdexcept>
 #include <vector>
 
 #include "VulkanUtils.h"  // vkCheck
@@ -34,6 +35,13 @@ auto createDescriptorSetLayout(VkDevice device,
 auto createDescriptorPool(VkDevice device,
                           std::initializer_list<VkDescriptorPoolSize> poolSizes,
                           uint32_t maxSets) -> VkDescriptorPool {
+  // maxSets is a Vulkan-required positive value; reject 0 up front with a clear
+  // message rather than relying on a driver error / validation message.
+  if (maxSets == 0) {
+    throw std::invalid_argument(
+        "createDescriptorPool: maxSets must be greater than 0");
+  }
+
   std::vector<VkDescriptorPoolSize> sizes(poolSizes);
 
   VkDescriptorPoolCreateInfo poolInfo{};

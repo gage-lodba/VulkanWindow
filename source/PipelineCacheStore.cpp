@@ -1,10 +1,14 @@
 #include "PipelineCacheStore.h"
 
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 
 #if defined(_WIN32)
+#include <fcntl.h>
+#include <io.h>
 #include <process.h>
 #else
 #include <fcntl.h>
@@ -44,19 +48,34 @@ auto currentProcessId() -> int64_t {
 #endif
 }
 
-// Flush a path to disk. Only the platforms that need it pay for it: the Windows
-// CRT flushes on close, so these are no-ops there.
-void syncFile(const fs::path &path) {
-#if !defined(_WIN32)
-  if (int fd = ::open(path.c_str(), O_WRONLY); fd >= 0) {
-    ::fsync(fd);
-    ::close(fd);
-  }
+// Flush a file's contents to disk. Returns false when the flush could not be
+// performed, so writeFileAtomically() can avoid publishing a temp file whose
+// data may not be durable. On POSIX this is open+fsync; on Windows the CRT
+// close only pushes data to the OS cache, so use _commit (FlushFileBuffers) on
+// the closed file to make the same "flushed to disk" guarantee. Both paths are
+// cheap and only run once per save.
+auto syncFile(const fs::path &path) -> bool {
+#if defined(_WIN32)
+  // _wopen so Windows non-ASCII paths (fs::path::c_str() is wchar_t*) work.
+  const int fd = ::_wopen(path.c_str(), _O_WRONLY | _O_BINARY);
+  if (fd < 0) return false;
+  const bool ok = ::_commit(fd) == 0;
+  ::_close(fd);
+  return ok;
 #else
-  (void)path;
+  const int fd = ::open(path.c_str(), O_WRONLY);
+  if (fd < 0) return false;
+  const bool ok = ::fsync(fd) == 0;
+  ::close(fd);
+  return ok;
 #endif
 }
 
+// Make the rename's directory entry durable. POSIX can fsync the parent
+// directory; Windows has no portable equivalent (opening a directory handle
+// would need FILE_FLAG_BACKUP_SEMANTICS + FlushFileBuffers), so there the
+// rename itself relies on the filesystem's metadata journaling. Best-effort
+// either way: a failure here is not treated as a failed save.
 void syncDirectory(const fs::path &path) {
 #if !defined(_WIN32)
   if (int fd = ::open(path.c_str(), O_RDONLY); fd >= 0) {
@@ -133,15 +152,26 @@ auto defaultPipelineCachePath(const std::string &appName) -> fs::path {
   if (const auto dir = defaultCacheDir()) {
     return pipelineCachePathIn(*dir, appName);
   }
-  // No platform cache location: keep the old behaviour of a CWD-relative file
-  // rather than failing to persist anything.
-  return {"pipeline_cache.bin"};
+  // No platform cache location: fall back to a namespaced subdirectory of the
+  // current working directory rather than a single shared "pipeline_cache.bin".
+  // Keeping the app-name segment means two apps started from the same
+  // directory don't overwrite each other's cache, and it gives the temp files
+  // written by writeFileAtomically() a real parent directory so load()'s stale
+  // temp sweep can find them.
+  return fs::current_path() / appName / "pipeline_cache.bin";
 }
 
 void sweepStaleTemps(const fs::path &target, std::chrono::seconds staleAfter) {
   std::error_code ec;
-  const fs::path dir = target.parent_path();
-  if (dir.empty()) return;
+  fs::path dir = target.parent_path();
+  if (dir.empty()) {
+    // A bare relative target ("cache.bin") keeps its temp files in the
+    // current working directory, so sweep there instead of skipping the sweep.
+    // current_path() can fail (e.g. deleted CWD); this best-effort sweep then
+    // simply does nothing.
+    dir = fs::current_path(ec);
+    if (ec) return;
+  }
   const std::string prefix = target.filename().string() + ".tmp.";
 
   const auto now = fs::file_time_type::clock::now();
@@ -166,13 +196,13 @@ void sweepStaleTemps(const fs::path &target, std::chrono::seconds staleAfter) {
 auto writeFileAtomically(const fs::path &path,
                          std::span<const std::byte> data) -> bool {
   std::error_code ec;
-  // Only when there is a parent to create: a bare relative filename (the
-  // no-platform-cache-dir fallback in defaultPipelineCachePath) has an empty
-  // parent_path(), and create_directories("") sets EINVAL. The error_code
-  // overload does not throw, so this is not a correctness fix — the file is
-  // still written — it just avoids recording a meaningless error in `ec`,
-  // which is checked below for the rename. Errors are otherwise ignored:
-  // opening the file fails gracefully and persistence is best-effort.
+  // Only when there is a parent to create: callers may pass a bare relative
+  // filename (e.g. tests, or a caller that derived its own path), whose
+  // parent_path() is empty — create_directories("") sets EINVAL. The
+  // error_code overload does not throw, so this is not a correctness fix (the
+  // file is still written); it just avoids recording a meaningless error in
+  // `ec`, which is checked below for the rename. Opening the file fails
+  // gracefully and persistence is best-effort.
   if (!path.parent_path().empty()) {
     fs::create_directories(path.parent_path(), ec);
   }
@@ -195,8 +225,12 @@ auto writeFileAtomically(const fs::path &path,
   }
 
   // Sync data to disk before the rename so a power loss between rename and the
-  // kernel flushing dirty pages can't leave a torn cache.
-  syncFile(tmpPath);
+  // kernel flushing dirty pages can't leave a torn cache. A failed flush means
+  // durability can't be promised for this blob, so don't publish the temp file.
+  if (!syncFile(tmpPath)) {
+    fs::remove(tmpPath, ec);
+    return false;
+  }
 
   fs::rename(tmpPath, path, ec);
   if (ec) {

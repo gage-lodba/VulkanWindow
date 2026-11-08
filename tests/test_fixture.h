@@ -107,27 +107,43 @@ inline void VulkanTestFixture::createInstance() {
   }
   instanceApiVersion = std::min(loaderVersion, VK_API_VERSION_1_3);
 
-  // Probe VK_KHR_portability_enumeration and VK_EXT_headless_surface.
-  // Portability: so MoltenVK devices are enumerated.
-  // Headless surface: lets tests that need a VkSurfaceKHR run headlessly.
+  // Probe the instance extensions the fixture can use:
+  //  - VK_KHR_portability_enumeration: so MoltenVK devices are enumerated.
+  //  - VK_KHR_surface + VK_EXT_headless_surface: lets tests that need a
+  //    VkSurfaceKHR run headlessly.
+  // VK_EXT_headless_surface has a hard dependency on VK_KHR_surface, so it may
+  // only be enabled when both are available (enabling it alone violates
+  // VUID-vkCreateInstance-ppEnabledExtensionNames-01388). The surface extension
+  // is also what provides every vkGetPhysicalDeviceSurface* entry point the
+  // queue-family / swap-chain query helpers call, so it must be enabled for
+  // those tests to be valid usage rather than driver-tolerated.
   std::vector<const char*> extensions;
   bool portability = false;
+  bool hasSurface = false;
+  bool hasHeadless = false;
   {
     uint32_t extCount = 0;
     vkEnumerateInstanceExtensionProperties(nullptr, &extCount, nullptr);
     std::vector<VkExtensionProperties> avail(extCount);
     vkEnumerateInstanceExtensionProperties(nullptr, &extCount, avail.data());
     for (const auto& e : avail) {
-      if (std::string_view(e.extensionName) ==
-          VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) {
+      const std::string_view name(e.extensionName);
+      if (name == VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME) {
         portability = true;
-        extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
-      } else if (std::string_view(e.extensionName) ==
-                 VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) {
-        hasHeadlessSurfaceExt = true;
-        extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
+      } else if (name == VK_KHR_SURFACE_EXTENSION_NAME) {
+        hasSurface = true;
+      } else if (name == VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME) {
+        hasHeadless = true;
       }
     }
+  }
+  if (portability) {
+    extensions.push_back(VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME);
+  }
+  if (hasSurface && hasHeadless) {
+    hasHeadlessSurfaceExt = true;
+    extensions.push_back(VK_KHR_SURFACE_EXTENSION_NAME);
+    extensions.push_back(VK_EXT_HEADLESS_SURFACE_EXTENSION_NAME);
   }
 
   VkApplicationInfo appInfo{};

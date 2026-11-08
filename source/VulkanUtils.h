@@ -8,8 +8,16 @@
 
 namespace vkutil {
 
-/// Translate VkResult to its symbolic string. Returns "VK_RESULT_<unknown>"
-/// for codes not in the known set.
+/// Translate VkResult to its symbolic string. Covers every result value
+/// defined by the Vulkan headers the mapping was generated from
+/// (VK_HEADER_VERSION 363: 50 distinct values) and is guarded by
+/// VK_HEADER_VERSION so it still compiles against, and maps every value of,
+/// older headers back to Vulkan 1.3.204 (38 values; 1.3.275 has 47). Returns
+/// "VK_RESULT_<unknown>" only for result codes introduced after the mapping was
+/// last extended; the unit test's header-version static_assert flags a Vulkan
+/// headers bump so the mapping can be updated. The returned strings are the
+/// current (Vulkan 1.4) canonical spellings; aliases share one numeric value
+/// and therefore one string.
 auto vkResultString(VkResult r) -> const char*;
 
 /// Throw std::runtime_error if `r != VK_SUCCESS`, formatted as
@@ -17,8 +25,12 @@ auto vkResultString(VkResult r) -> const char*;
 void vkCheck(VkResult r, const char* what);
 
 /// Create a VkShaderModule from the given SPIR-V bytecode. `code` must be
-/// aligned to a 4-byte boundary. Throws on failure; destroy with
-/// vkDestroyShaderModule.
+/// aligned to a 4-byte boundary and point at `sizeBytes` bytes.
+///
+/// Throws std::invalid_argument when `code` is null, `sizeBytes` is 0, or
+/// `sizeBytes` is not a multiple of sizeof(uint32_t) (the Vulkan-required
+/// shape of VkShaderModuleCreateInfo). Throws std::runtime_error if
+/// vkCreateShaderModule fails; destroy the module with vkDestroyShaderModule.
 [[nodiscard]] auto createShaderModule(VkDevice device, const uint32_t* code,
                                       size_t sizeBytes) -> VkShaderModule;
 
@@ -29,9 +41,11 @@ void vkCheck(VkResult r, const char* what);
 /// values so the GPU's linear→sRGB encode reproduces the authored colour.
 auto srgbToLinear(float channel) -> float;
 
-/// True for the 8-bit sRGB surface formats — the encodings where the GPU
-/// gamma-encodes colour on store. Used to decide whether ImGui's sRGB-authored
-/// colours need linearising for the chosen swap-chain format.
+/// True for every 8-bit sRGB format — the encodings where the GPU
+/// gamma-encodes colour on store: R8_SRGB, R8G8_SRGB, R8G8B8_SRGB,
+/// B8G8R8_SRGB, R8G8B8A8_SRGB, B8G8R8A8_SRGB and A8B8G8R8_SRGB_PACK32. Used to
+/// decide whether ImGui's sRGB-authored colours need linearising for the
+/// chosen swap-chain format.
 auto isSrgbFormat(VkFormat format) -> bool;
 
 struct QueueFamilyIndices {
