@@ -3,6 +3,7 @@
 #include <vk_mem_alloc.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstring>
 #include <stdexcept>
 
@@ -39,6 +40,10 @@ auto makeBuffer(VmaAllocator allocator, VkDeviceSize size,
 
 auto createMappedBuffer(VmaAllocator allocator, VkDeviceSize size,
                         VkBufferUsageFlags usage) -> Buffer {
+  if (size == 0) {
+    throw std::invalid_argument(
+        "createMappedBuffer: size must be greater than 0");
+  }
   return makeBuffer(allocator, size, usage,
                     VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
                         VMA_ALLOCATION_CREATE_MAPPED_BIT);
@@ -79,8 +84,13 @@ auto beginSingleTimeCommands(VkDevice device,
   VkCommandBufferBeginInfo beginInfo{};
   beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
   beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-  vkCheck(vkBeginCommandBuffer(commandBuffer, &beginInfo),
-          "Failed to begin single-time command buffer");
+  if (const VkResult beginResult =
+          vkBeginCommandBuffer(commandBuffer, &beginInfo);
+      beginResult != VK_SUCCESS) {
+    // Don't retain the just-allocated buffer on the begin-failure path.
+    vkFreeCommandBuffers(device, commandPool, 1, &commandBuffer);
+    vkCheck(beginResult, "Failed to begin single-time command buffer");
+  }
   return commandBuffer;
 }
 
@@ -104,22 +114,36 @@ auto createDeviceLocalBuffer(VmaAllocator allocator, VkDevice device,
                              VkQueue queue, uint32_t queueFamily,
                              const void *data, VkDeviceSize size,
                              VkBufferUsageFlags usage) -> Buffer {
-  Buffer staging =
-      createMappedBuffer(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-  // createMappedBuffer always persistently maps, but guard so the memcpy below
-  // can't run on a null pointer if that ever changes.
-  if (staging.mapped == nullptr) {
-    destroyBuffer(allocator, staging);
-    throw std::runtime_error("Staging buffer was not host-mapped");
+  if (size == 0) {
+    throw std::invalid_argument(
+        "createDeviceLocalBuffer: size must be greater than 0");
   }
-  std::memcpy(staging.mapped, data, static_cast<size_t>(size));
-  // No-op for coherent memory; required before the device reads non-coherent
-  // memory. The subsequent queue submit makes the flushed host writes visible.
-  vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+  if (data == nullptr) {
+    throw std::invalid_argument(
+        "createDeviceLocalBuffer: data must not be null");
+  }
 
   VkCommandPool pool = VK_NULL_HANDLE;
+  Buffer staging;
   Buffer result;
   try {
+    staging =
+        createMappedBuffer(allocator, size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+    // createMappedBuffer always persistently maps, but guard so the memcpy
+    // below can't run on a null pointer if that ever changes.
+    if (staging.mapped == nullptr) {
+      destroyBuffer(allocator, staging);
+      throw std::runtime_error("Staging buffer was not host-mapped");
+    }
+    // Explicit VkDeviceSize -> size_t: the scaffold targets 64-bit hosts where
+    // size_t can represent every VkDeviceSize.
+    std::memcpy(staging.mapped, data, static_cast<size_t>(size));
+    // No-op for coherent memory; required before the device reads non-coherent
+    // memory. The subsequent queue submit makes the flushed host writes
+    // visible. flushMapped checks the VmaAllocator result and throws on
+    // failure.
+    flushMapped(allocator, staging);
+
     result = makeBuffer(allocator, size,
                         usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT, 0);
 
@@ -165,6 +189,17 @@ auto createDeviceLocalBuffer(VmaAllocator allocator, VkDevice device,
 void transitionImageLayout(VkCommandBuffer commandBuffer, VkImage image,
                            VkImageLayout oldLayout, VkImageLayout newLayout,
                            uint32_t mipLevels, VkImageAspectFlags aspectMask) {
+  // VkImageSubresourceRange requires levelCount > 0 and aspectMask != 0; throw
+  // here instead of recording a barrier that violates Vulkan valid usage.
+  if (mipLevels == 0) {
+    throw std::invalid_argument(
+        "transitionImageLayout: mipLevels must be greater than 0");
+  }
+  if (aspectMask == 0) {
+    throw std::invalid_argument(
+        "transitionImageLayout: aspectMask must not be empty");
+  }
+
   VkImageMemoryBarrier barrier{};
   barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
   barrier.oldLayout = oldLayout;
@@ -200,7 +235,9 @@ void transitionImageLayout(VkCommandBuffer commandBuffer, VkImage image,
     srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
     dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
   } else {
-    // Conservative fallback for any other pair.
+    // Conservative fallback for any other pair (including UNDEFINED -> other,
+    // where the old contents are discarded but the broader barrier is kept for
+    // simplicity). Intentionally over-synchronized rather than wrong.
     barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT;
     barrier.dstAccessMask =
         VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT;
@@ -363,16 +400,43 @@ auto createTexture2D(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
                      const void *data, VkDeviceSize dataSize, uint32_t width,
                      uint32_t height, VkFormat format,
                      bool generateMipmaps) -> Image {
+  if (width == 0) {
+    throw std::invalid_argument(
+        "createTexture2D: width must be greater than 0");
+  }
+  if (height == 0) {
+    throw std::invalid_argument(
+        "createTexture2D: height must be greater than 0");
+  }
+  if (dataSize == 0) {
+    throw std::invalid_argument(
+        "createTexture2D: dataSize must be greater than 0");
+  }
+  if (data == nullptr) {
+    throw std::invalid_argument("createTexture2D: data must not be null");
+  }
+
   const uint32_t mipLevels =
       generateMipmaps ? computeMipLevels(width, height) : 1U;
 
   if (mipLevels > 1) {
+    // recordMipChain() blits linear-filtered from each level into the next, so
+    // vkCmdBlitImage requires all three format features: SAMPLED_IMAGE_FILTER_
+    // LINEAR for the filter, and BLIT_SRC + BLIT_DST because the same format is
+    // used as both source and destination on optimal tiling.
     VkFormatProperties props{};
     vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &props);
-    if ((props.optimalTilingFeatures &
-         VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT) == 0) {
+    constexpr VkFormatFeatureFlags kRequiredBlitFeatures =
+        VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT |
+        VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT;
+    if ((props.optimalTilingFeatures & kRequiredBlitFeatures) !=
+        kRequiredBlitFeatures) {
       throw std::runtime_error(
-          "Texture format does not support linear blit for mipmap generation");
+          "Texture format does not support linear-filter blitting for mipmap "
+          "generation (optimal tiling needs "
+          "VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT, "
+          "VK_FORMAT_FEATURE_BLIT_SRC_BIT and "
+          "VK_FORMAT_FEATURE_BLIT_DST_BIT)");
     }
   }
 
@@ -393,8 +457,10 @@ auto createTexture2D(VmaAllocator allocator, VkPhysicalDevice physicalDevice,
       destroyBuffer(allocator, staging);
       throw std::runtime_error("Staging buffer was not host-mapped");
     }
+    // Explicit VkDeviceSize -> size_t: 64-bit hosts only (see above).
     std::memcpy(staging.mapped, data, static_cast<size_t>(dataSize));
-    vmaFlushAllocation(allocator, staging.allocation, 0, VK_WHOLE_SIZE);
+    // flushMapped checks the VmaAllocator result and throws on failure.
+    flushMapped(allocator, staging);
 
     VkCommandPoolCreateInfo poolInfo{};
     poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;

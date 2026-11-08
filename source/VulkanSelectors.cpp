@@ -40,6 +40,15 @@ auto chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR> &available,
           ? std::array{VK_FORMAT_B8G8R8A8_SRGB, VK_FORMAT_R8G8B8A8_SRGB}
           : std::array{VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM};
 
+  // A surface may advertise exactly one format, VK_FORMAT_UNDEFINED, meaning
+  // "no preferred format — any format this implementation supports may be
+  // used". Substitute the requested encoding: VK_FORMAT_UNDEFINED is not a
+  // usable VkSwapchainCreateInfoKHR::imageFormat.
+  if (available.size() == 1 && available[0].format == VK_FORMAT_UNDEFINED) {
+    return {.format = preferred[0],
+            .colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
+  }
+
   for (VkFormat want : preferred) {
     for (const auto &availableFormat : available) {
       if (availableFormat.format == want &&

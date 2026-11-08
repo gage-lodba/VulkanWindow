@@ -16,6 +16,10 @@ namespace vkutil {
 /// A buffer paired with its VMA allocation. `mapped` is non-null only for
 /// host-visible, persistently-mapped buffers (see createMappedBuffer); write
 /// CPU-side data through it.
+///
+/// Plain non-owning aggregate by design (not RAII): destroying it releases
+/// nothing. Call destroyBuffer() exactly once on the returned object; copying
+/// the struct does not transfer ownership, so only one copy may be destroyed.
 struct Buffer {
   VkBuffer buffer{VK_NULL_HANDLE};
   VmaAllocation allocation{VK_NULL_HANDLE};
@@ -29,6 +33,10 @@ struct Buffer {
 /// usage; VK_BUFFER_USAGE_TRANSFER_DST_BIT is added for you. Blocks until the
 /// copy completes (vkQueueWaitIdle), so it's for one-shot / load-time uploads,
 /// not the per-frame hot path. Throws std::runtime_error on failure.
+///
+/// Throws std::invalid_argument when `data` is null or `size` is 0, and
+/// std::runtime_error on any Vulkan/VMA failure (including a failed staging
+/// flush).
 ///
 /// Thread-safety: submits on `queue`, which Vulkan requires be externally
 /// synchronized. Call before VulkanRenderer/Application::run() (or while the
@@ -44,13 +52,22 @@ struct Buffer {
 /// the CPU (uniforms, dynamic vertices). Write through `Buffer::mapped`.
 /// Intended for sequential writes (e.g. memcpy) — don't read it back.
 ///
+/// The sequential-write hint lets VMA choose uncached/write-combined memory, so
+/// only write (memcpy) into `mapped`; reading it back is slow. On
+/// UMA/integrated GPUs the chosen host-visible type may also be device-local.
+///
 /// Visibility: host writes are not guaranteed visible to the GPU until the
 /// memory is flushed. The allocation may be non-coherent, so call flushMapped()
 /// after writing and before the queue submit that reads it. On coherent memory
 /// (the common case on discrete GPUs) the flush is a cheap no-op, and a
 /// subsequent vkQueueSubmit makes the writes visible, so flushing once per
-/// frame after the frame's writes is both sufficient and portable.
-/// Throws on failure.
+/// frame after the frame's writes is both sufficient and portable. On
+/// non-coherent memory, keep CPU writes sequential and flush once after the
+/// last write of the frame; reads are not supported, so no invalidate is
+/// needed.
+///
+/// `size` must be non-zero. Throws std::invalid_argument when `size` is 0 and
+/// std::runtime_error on any Vulkan/VMA failure.
 [[nodiscard]] auto createMappedBuffer(VmaAllocator allocator, VkDeviceSize size,
                                       VkBufferUsageFlags usage) -> Buffer;
 
@@ -67,12 +84,17 @@ void flushMapped(VmaAllocator allocator, const Buffer &buffer);
 void destroyBuffer(VmaAllocator allocator, Buffer &buffer);
 
 /// Allocate and begin a primary command buffer for a one-shot submission
-/// (ONE_TIME_SUBMIT). Pair with endSingleTimeCommands. Throws on failure.
+/// (ONE_TIME_SUBMIT). Pair with endSingleTimeCommands. Throws on failure; if
+/// vkBeginCommandBuffer fails the just-allocated command buffer is freed again
+/// before throwing, so nothing is retained on the begin-failure path.
 [[nodiscard]] auto beginSingleTimeCommands(
     VkDevice device, VkCommandPool commandPool) -> VkCommandBuffer;
 
 /// End, submit, and wait for a command buffer from beginSingleTimeCommands,
-/// then free it. Blocks on vkQueueWaitIdle. Throws on failure.
+/// then free it. Blocks on vkQueueWaitIdle. Throws on failure. A failure after
+/// vkEndCommandBuffer (submit or wait — e.g. device lost) leaves the buffer
+/// allocated in `commandPool` rather than freeing it in a possibly-pending
+/// state; destroying/resetting the pool reclaims it.
 ///
 /// Thread-safety: submits on `queue` (externally-synchronized in Vulkan). Don't
 /// call concurrently with drawFrame() on the same queue — no internal locking.
@@ -80,6 +102,10 @@ void endSingleTimeCommands(VkDevice device, VkCommandPool commandPool,
                            VkQueue queue, VkCommandBuffer commandBuffer);
 
 /// A 2D image paired with its VMA allocation and a view covering all mips.
+///
+/// Plain non-owning aggregate by design (not RAII): destroying it releases
+/// nothing. Call destroyImage() exactly once on the returned object; copying
+/// the struct does not transfer ownership, so only one copy may be destroyed.
 struct Image {
   VkImage image{VK_NULL_HANDLE};
   VmaAllocation allocation{VK_NULL_HANDLE};
@@ -92,11 +118,25 @@ struct Image {
 /// Create a 2D sampled texture from tightly-packed pixel data: a device-local
 /// image, staged upload, transitioned to SHADER_READ_ONLY_OPTIMAL, plus a view.
 /// `data`/`dataSize` is level 0 (`width`×`height` texels of `format`). When
-/// `generateMipmaps` is true a full mip chain is built by linear blits — which
-/// requires `format` to support linear-filter blitting on optimal tiling (it
-/// throws otherwise). A transient command pool is created/destroyed internally
-/// and the upload blocks (vkQueueWaitIdle), so this is for load-time use.
-/// Throws std::runtime_error on failure.
+/// `generateMipmaps` is true a full mip chain is built by linear blits, which
+/// requires `format` on optimal tiling to support ALL of
+/// VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT,
+/// VK_FORMAT_FEATURE_BLIT_SRC_BIT and VK_FORMAT_FEATURE_BLIT_DST_BIT (the same
+/// format is both blit source and destination); it throws std::runtime_error
+/// otherwise. A transient command pool is created/destroyed internally and the
+/// upload blocks (vkQueueWaitIdle), so this is for load-time use.
+/// `dataSize` must cover the packed level-0 image: at least
+/// width*height*(bytes per texel of `format`) bytes. A format's texel size is
+/// not trivially knowable here, so a too-small `dataSize` is reported by the
+/// Vulkan validation layer at the copy (out-of-range buffer read) rather than
+/// by this function.
+///
+/// `physicalDevice` is only consulted for the format-feature check that
+/// mipmap generation performs; it is not used when `generateMipmaps` is false.
+///
+/// Throws std::invalid_argument when `data` is null, `dataSize` is 0, or
+/// `width`/`height` are 0. Throws std::runtime_error on any Vulkan/VMA failure,
+/// including a failed staging-buffer flush.
 ///
 /// Thread-safety: submits on `queue`, which Vulkan requires be externally
 /// synchronized. Call before VulkanRenderer/Application::run() (or while the
@@ -115,7 +155,19 @@ struct Image {
 /// pipeline stages are chosen for the common texture-upload transitions
 /// (UNDEFINED→TRANSFER_DST, TRANSFER_DST→SHADER_READ_ONLY,
 /// UNDEFINED→SHADER_READ_ONLY); other layout pairs fall back to a conservative
-/// ALL_COMMANDS / MEMORY_READ|WRITE barrier. Covers mip levels [0, mipLevels).
+/// ALL_COMMANDS / MEMORY_READ|WRITE barrier. Covers mip levels [0, mipLevels)
+/// of array layer 0.
+///
+/// `oldLayout` must be VK_IMAGE_LAYOUT_UNDEFINED or the image's actual current
+/// layout (Vulkan valid usage). For the two SHADER_READ_ONLY_OPTIMAL
+/// destinations the barrier's destination stage is the fragment shader stage,
+/// which covers the usual sampled-texture upload; sampling from other stages
+/// (e.g. compute or vertex shaders) needs an additional barrier with the
+/// matching stage. `aspectMask` must be valid for the image's format (e.g.
+/// COLOR for colour textures, DEPTH/STENCIL for depth-stencil images).
+///
+/// Throws std::invalid_argument when `mipLevels` is 0 or `aspectMask` is 0,
+/// both of which would produce an invalid VkImageSubresourceRange.
 void transitionImageLayout(
     VkCommandBuffer commandBuffer, VkImage image, VkImageLayout oldLayout,
     VkImageLayout newLayout, uint32_t mipLevels = 1,

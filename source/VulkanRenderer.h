@@ -36,11 +36,13 @@ class VulkanRenderer {
   void drawFrame();
   void notifyResized() noexcept { framebufferResized = true; }
 
-  /// Complete ImGui initialisation (GLFW + Vulkan backends). Called once by
-  /// Application::run(), after the app has had the chance to register its
-  /// style/font callbacks — those cannot run any earlier, and ImGui's backends
-  /// latch some io.ConfigFlags state at init, so the style must be applied
-  /// first. Idempotent. Throws on failure.
+  /// Complete ImGui initialisation (GLFW + Vulkan backends). Idempotent; a
+  /// no-op once the backends are up. Application::run() calls it for the
+  /// initial ImGui context, after the app has had the chance to register its
+  /// style/font callbacks (those cannot run any earlier, and the style must be
+  /// applied before the backends are initialised). recreateSwapChain() calls it
+  /// for every rebuilt context, before the app's recreated-callback fires.
+  /// Throws on failure.
   void finalizeInit();
 
   /// Change the preferred present mode at runtime. Triggers a swap-chain
@@ -89,10 +91,12 @@ class VulkanRenderer {
   /// it. Not called for the initial swap-chain — build those resources before
   /// run(). Must be set from / fires on the thread that drives drawFrame().
   ///
-  /// When `formatChanged` is true the ImGui context is rebuilt (its render pass
-  /// changed), so handles obtained from the ImGui Vulkan backend — e.g. the
-  /// VkDescriptorSet returned by ImGui_ImplVulkan_AddTexture — are destroyed
-  /// with it and must be re-registered here.
+  /// When `imguiContextRebuilt` is true the ImGui context (and its backends)
+  /// was torn down and recreated, so handles obtained from the ImGui Vulkan
+  /// backend — e.g. the VkDescriptorSet returned by
+  /// ImGui_ImplVulkan_AddTexture — are destroyed with it and must be
+  /// re-registered here. It is true for format, image-count and min-image-count
+  /// changes, so it can be true while `formatChanged` is false.
   void setSwapchainRecreatedCallback(
       std::function<void(const SwapchainRecreateInfo &)> callback);
 

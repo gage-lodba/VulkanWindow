@@ -56,18 +56,19 @@ class Application {
 
   /// Set a callback to customise the ImGui style/theme.
   /// Replaces the built-in dark theme. Applied immediately, and again before
-  /// the ImGui backends are initialised (at the start of run()), so a callback
-  /// set here can also influence backend setup — e.g. setting
-  /// `ImGuiConfigFlags_ViewportsEnable` to opt into multi-viewport. Setting it
-  /// after run() has started only affects the theme from then on.
+  /// the ImGui backends are initialised (for the initial context at the start
+  /// of run(), and for each context rebuilt by a swap-chain recreation), so a
+  /// callback set here runs before the first frame and can set io.ConfigFlags —
+  /// e.g. `ImGuiConfigFlags_ViewportsEnable` to opt into multi-viewport.
+  /// Setting it after run() has started only affects the theme from then on.
   /// Must be called from the thread that constructed Application; not safe to
   /// invoke concurrently with run().
   void setStyleCallback(std::function<void()> callback);
 
-  /// Set a callback that loads custom fonts into ImGui's atlas. Applied
-  /// immediately, and re-applied automatically after a swap-chain rebuild that
-  /// recreates the ImGui context (e.g. a surface-format change), so the fonts
-  /// persist. Inside the callback add fonts with
+  /// Set a callback that loads custom fonts into ImGui's atlas. Applied exactly
+  /// once per ImGui context: immediately when set, and again when a swap-chain
+  /// rebuild recreates the context, so the fonts persist without being loaded
+  /// twice. Inside the callback add fonts with
   /// `ImGui::GetIO().Fonts->AddFontFromFileTTF(path, sizePx)` — Dear ImGui
   /// (>= 1.92) uploads the atlas lazily, so no manual texture build is needed.
   /// Must be called from the thread that constructed Application; not safe to
@@ -77,12 +78,13 @@ class Application {
   /// Set a callback invoked after the swap-chain is rebuilt (resize, present-
   /// mode switch, surface-format change). Use it to recreate pipelines or
   /// resources that depend on the render pass, formats, or extent; the
-  /// `SwapchainRecreateInfo` argument flags whether the format / image count
-  /// changed and carries the new extent. The device is idle when it fires.
-  /// When `formatChanged` is true the ImGui context is rebuilt too, so ImGui
-  /// texture handles (e.g. the VkDescriptorSet from
+  /// `SwapchainRecreateInfo` argument flags whether the format / image count /
+  /// ImGui context changed and carries the new extent. The device is idle when
+  /// it fires.
+  /// When `imguiContextRebuilt` is true the ImGui context has been recreated,
+  /// so ImGui texture handles (e.g. the VkDescriptorSet from
   /// ImGui_ImplVulkan_AddTexture) are destroyed with it and must be
-  /// re-registered here.
+  /// re-registered here. It can be true while `formatChanged` is false.
   /// Not called for the initial swap-chain — create those resources up front
   /// (see getContext() / getSwapchain()). Include "SwapchainRecreateInfo.h"
   /// for the definition (forward-declared here so this header stays light).

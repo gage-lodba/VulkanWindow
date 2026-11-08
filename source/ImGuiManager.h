@@ -1,5 +1,7 @@
 #pragma once
 
+// GLFW must not pull in the OpenGL headers; this project only uses Vulkan.
+#define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
 
@@ -16,8 +18,9 @@ class ImGuiManager {
   /// `linearizeStyleColors` converts the built-in theme's palette from sRGB to
   /// linear (only affects the built-in theme, not a user `styleCallback`); set
   /// it when the swap-chain format is sRGB so colours aren't double-encoded.
-  /// `fontCallback`, if non-empty, is invoked during construction to load fonts
-  /// into the atlas (and again whenever the ImGui context is rebuilt).
+  /// `fontCallback`, if non-empty, is invoked once per ImGui context: during
+  /// construction for a rebuilt context, or as soon as the app sets it for the
+  /// initial context.
   ImGuiManager(GLFWwindow *window, uint32_t apiVersion, VkInstance instance,
                VkPhysicalDevice physicalDevice, VkDevice device,
                uint32_t queueFamily, VkQueue queue, VkRenderPass renderPass,
@@ -28,9 +31,12 @@ class ImGuiManager {
                std::function<void()> fontCallback = {});
   ~ImGuiManager();
 
-  // Delete copy constructor and assignment operator
+  // Non-copyable, non-movable: the manager owns process-global ImGui state
+  // (the ImGui context and backend registrations) that must not be duplicated.
   ImGuiManager(const ImGuiManager &) = delete;
   auto operator=(const ImGuiManager &) -> ImGuiManager & = delete;
+  ImGuiManager(ImGuiManager &&) = delete;
+  auto operator=(ImGuiManager &&) -> ImGuiManager & = delete;
 
   void newFrame();
   void render(VkCommandBuffer commandBuffer);
@@ -43,9 +49,8 @@ class ImGuiManager {
   /// vendored ImGui Vulkan backend emits a validation error on this path
   /// (ocornut/imgui#9496). Re-enable it by setting the flag from a style
   /// callback: the style is applied by finalizeInit() *before* the backends
-  /// initialise, which is what makes it take effect (ImGui's GLFW backend
-  /// latches ImGuiBackendFlags_PlatformHasViewports at init). Note it stays
-  /// off on Wayland regardless — see deps/ImGui/backends/imgui_impl_glfw.cpp.
+  /// initialise, so the flag is set before the first frame. Note it stays off
+  /// on Wayland regardless — see deps/ImGui/backends/imgui_impl_glfw.cpp.
   void renderPlatformWindows();
 
   /// Inform the Vulkan backend that the swap-chain's min image count
@@ -63,19 +68,18 @@ class ImGuiManager {
   /// If no callback is set, the built-in dark theme is used.
   void setStyleCallback(std::function<void()> callback);
 
-  /// Set a callback that loads fonts into ImGui's atlas. Called once
-  /// immediately (and again whenever the ImGui context is rebuilt). Add fonts
-  /// via `ImGui::GetIO().Fonts->AddFontFromFileTTF(...)` inside it; the Vulkan
-  /// backend uploads the atlas lazily, so no manual texture build is needed.
+  /// Set a callback that loads fonts into ImGui's atlas. Called exactly once
+  /// per ImGui context: immediately when set, and once for each rebuilt
+  /// context. Add fonts via `ImGui::GetIO().Fonts->AddFontFromFileTTF(...)`
+  /// inside it; the Vulkan backend uploads the atlas lazily, so no manual
+  /// texture build is needed.
   void setFontCallback(std::function<void()> callback);
 
   /// Initialise the GLFW + Vulkan backends. The constructor deliberately stops
   /// short of this: the app's style callback cannot exist until Application's
-  /// constructor has returned, and ImGui's backends latch some state from
-  /// io.ConfigFlags at init (notably ImGuiBackendFlags_PlatformHasViewports).
-  /// Applying the style before init is therefore the only way a style callback
-  /// can influence backend setup. Idempotent — safe to call again after a
-  /// swap-chain rebuild has already re-initialised the manager.
+  /// constructor has returned, and the style must be applied before the
+  /// backends are initialised so any io.ConfigFlags it sets are in place for
+  /// the first frame. Idempotent — a no-op once the backends are up.
   void finalizeInit();
 
  private:
@@ -83,6 +87,10 @@ class ImGuiManager {
   /// GLFW + Vulkan backend init, split out of the constructor so finalizeInit()
   /// can apply the style first. Throws on failure, leaving the context intact.
   void initBackends();
+  /// Invoke `fontCallback` once per ImGui context (no-op once fonts for this
+  /// context have been loaded). Covers a callback inherited from a previous
+  /// context when a rebuilt manager is constructed with the app's callback.
+  void applyFontCallbackIfNeeded();
 
   // Backend-init parameters, stored because the constructor no longer uses them
   // directly — finalizeInit() does. Prefixed so they can't shadow the
@@ -109,4 +117,7 @@ class ImGuiManager {
   bool contextCreated{false};
   // True once both backends are up; makes finalizeInit() idempotent.
   bool backendsInited{false};
+  // True once fontCallback has run for this context, so it is never replayed
+  // (fonts are applied exactly once per ImGui context).
+  bool fontsApplied{false};
 };

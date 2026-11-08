@@ -6,9 +6,12 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include <charconv>
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
+#include <string_view>
+#include <utility>
 
 Application::Application() : Application(DEFAULT_WIDTH, DEFAULT_HEIGHT) {}
 
@@ -152,17 +155,25 @@ void Application::run() {
   uint64_t maxFrames = 0;
   if (const char* env = std::getenv("VULKANWINDOW_MAX_FRAMES");
       env != nullptr && env[0] != '\0') {
-    maxFrames = std::strtoull(env, nullptr, 10);
+    // All-or-nothing parse: trailing garbage, a leading '-' and overflow are
+    // ignored, so the documented "unset / 0 runs until the window is closed"
+    // behaviour applies to anything that isn't a complete non-negative integer.
+    const std::string_view value(env);
+    uint64_t parsedFrames = 0;
+    const auto [end, error] = std::from_chars(
+        value.data(), value.data() + value.size(), parsedFrames);
+    if (error == std::errc{} && end == value.data() + value.size()) {
+      maxFrames = parsedFrames;
+    }
   }
   uint64_t framesRendered = 0;
 
   // Finish ImGui initialisation now that the app has had its chance to call
   // setStyleCallback / setFontCallback. Those callbacks cannot run during
-  // Application's construction (the app's code has not executed yet), and a
-  // style callback has to be applied *before* ImGui's backends are initialised
-  // because they latch some io.ConfigFlags state at init — most visibly
-  // ImGuiBackendFlags_PlatformHasViewports. Idempotent, so calling run() twice
-  // is harmless.
+  // Application's construction (the app's code has not executed yet), and the
+  // style must be applied *before* ImGui's backends are initialised so any
+  // io.ConfigFlags it sets are in place for the first frame. Idempotent, so
+  // calling run() twice is harmless.
   renderer->finalizeInit();
 
   // Main application loop

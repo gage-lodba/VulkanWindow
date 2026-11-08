@@ -31,7 +31,17 @@ TEST_CASE("sanitizeCacheName falls back when the result would be empty") {
   CHECK(vkutil::sanitizeCacheName("") == "VulkanWindow");
   CHECK(vkutil::sanitizeCacheName(".") == "VulkanWindow");
   CHECK(vkutil::sanitizeCacheName("..") == "VulkanWindow");
+  CHECK(vkutil::sanitizeCacheName("...") == "VulkanWindow");
   CHECK(vkutil::sanitizeCacheName("   ") == "VulkanWindow");
+}
+
+TEST_CASE("sanitizeCacheName never leaves a path separator or trailing dot") {
+  // The result becomes a single path component, so a separator must not
+  // survive; unsafe characters become underscores rather than being dropped.
+  CHECK(vkutil::sanitizeCacheName("a/b") == "a_b");
+  CHECK(vkutil::sanitizeCacheName("a/.") == "a_");
+  CHECK(vkutil::sanitizeCacheName("///") == "___");
+  CHECK(vkutil::sanitizeCacheName("App. ") == "App");
 }
 
 // ---- chooseSwapSurfaceFormat ------------------------------------------------
@@ -67,6 +77,44 @@ TEST_CASE("chooseSwapSurfaceFormat falls back to RGBA when BGRA is absent") {
   CHECK(chosen.format == VK_FORMAT_R8G8B8A8_UNORM);
 }
 
+TEST_CASE(
+    "chooseSwapSurfaceFormat falls back to the first format with no encoding "
+    "match") {
+  // sRGB wanted, but the surface only advertises UNORM formats: the documented
+  // fallback is the first advertised format, unchanged.
+  const std::vector<VkSurfaceFormatKHR> avail = {fmt(VK_FORMAT_R8G8B8A8_UNORM),
+                                                 fmt(VK_FORMAT_B8G8R8A8_UNORM)};
+  const auto chosen =
+      vkutil::chooseSwapSurfaceFormat(avail, SurfaceFormatPreference::Srgb);
+  CHECK(chosen.format == avail[0].format);
+  CHECK(chosen.colorSpace == avail[0].colorSpace);
+}
+
+TEST_CASE(
+    "chooseSwapSurfaceFormat substitutes VK_FORMAT_UNDEFINED with a real "
+    "format") {
+  // A surface may advertise exactly one format, VK_FORMAT_UNDEFINED, meaning
+  // "any format the implementation supports". VK_FORMAT_UNDEFINED is not a
+  // usable swap-chain image format, so a real one in the requested encoding
+  // must be substituted.
+  const std::vector<VkSurfaceFormatKHR> avail = {
+      fmt(VK_FORMAT_UNDEFINED, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)};
+
+  SUBCASE("UNORM preference becomes BGRA UNORM") {
+    const auto chosen =
+        vkutil::chooseSwapSurfaceFormat(avail, SurfaceFormatPreference::Unorm);
+    CHECK(chosen.format == VK_FORMAT_B8G8R8A8_UNORM);
+    CHECK(chosen.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+  }
+
+  SUBCASE("sRGB preference becomes BGRA sRGB") {
+    const auto chosen =
+        vkutil::chooseSwapSurfaceFormat(avail, SurfaceFormatPreference::Srgb);
+    CHECK(chosen.format == VK_FORMAT_B8G8R8A8_SRGB);
+    CHECK(chosen.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+  }
+}
+
 TEST_CASE("chooseSwapSurfaceFormat ignores matches in the wrong colour space") {
   // Right format, wrong colour space -> not a match; falls back to first.
   std::vector<VkSurfaceFormatKHR> avail = {
@@ -95,6 +143,17 @@ TEST_CASE("chooseSwapPresentMode returns the requested mode when available") {
         VK_PRESENT_MODE_MAILBOX_KHR);
   CHECK(vkutil::chooseSwapPresentMode(avail, PresentMode::Immediate) ==
         VK_PRESENT_MODE_IMMEDIATE_KHR);
+}
+
+TEST_CASE(
+    "chooseSwapPresentMode returns the first mode for Vsync when FIFO is "
+    "absent") {
+  // A non-conforming driver that omits FIFO must not make this return a mode
+  // that is not advertised; the defensive branch falls back to available[0].
+  const std::vector<VkPresentModeKHR> avail = {VK_PRESENT_MODE_MAILBOX_KHR,
+                                               VK_PRESENT_MODE_IMMEDIATE_KHR};
+  CHECK(vkutil::chooseSwapPresentMode(avail, PresentMode::Vsync) ==
+        VK_PRESENT_MODE_MAILBOX_KHR);
 }
 
 TEST_CASE("chooseSwapPresentMode falls back to FIFO when preference absent") {
@@ -165,5 +224,11 @@ TEST_CASE("clampSwapExtent clamps the window size to the allowed range") {
     auto e = vkutil::clampSwapExtent(c, 8000, 8000);
     CHECK(e.width == 1920);
     CHECK(e.height == 1080);
+  }
+  SUBCASE("only the width is out of range") {
+    auto narrow = caps({kUndefined, kUndefined}, {640, 1}, {1920, 4320});
+    auto e = vkutil::clampSwapExtent(narrow, 100, 720);
+    CHECK(e.width == 640);   // clamped
+    CHECK(e.height == 720);  // within range, untouched
   }
 }

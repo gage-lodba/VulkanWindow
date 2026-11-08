@@ -1,8 +1,10 @@
 #include "VulkanRenderer.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
+#include <utility>
 
 #include "ImGuiManager.h"
 #include "Swapchain.h"
@@ -50,9 +52,13 @@ void VulkanRenderer::createCommandPool() {
   poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
   poolInfo.queueFamilyIndex = context->graphicsQueueFamily;
 
+  // Create into a local: vkCreateCommandPool leaves its output undefined on
+  // failure, and cleanup() must not destroy an indeterminate handle.
+  VkCommandPool newCommandPool = VK_NULL_HANDLE;
   vkCheck(
-      vkCreateCommandPool(context->device, &poolInfo, nullptr, &commandPool),
+      vkCreateCommandPool(context->device, &poolInfo, nullptr, &newCommandPool),
       "Failed to create command pool");
+  commandPool = newCommandPool;
 }
 
 void VulkanRenderer::createCommandBuffers() {
@@ -81,12 +87,18 @@ void VulkanRenderer::createSyncObjects() {
   fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
   for (size_t i = 0; i < framesInFlight; i++) {
-    vkCheck(vkCreateSemaphore(context->device, &semaphoreInfo, nullptr,
-                              &imageAvailableSemaphores[i]),
-            "Failed to create image-available semaphore");
+    // Create into locals and publish only on success: Vulkan leaves outputs
+    // undefined on failure, and cleanup() must not destroy garbage handles.
+    VkSemaphore semaphore = VK_NULL_HANDLE;
     vkCheck(
-        vkCreateFence(context->device, &fenceInfo, nullptr, &inFlightFences[i]),
-        "Failed to create in-flight fence");
+        vkCreateSemaphore(context->device, &semaphoreInfo, nullptr, &semaphore),
+        "Failed to create image-available semaphore");
+    imageAvailableSemaphores[i] = semaphore;
+
+    VkFence fence = VK_NULL_HANDLE;
+    vkCheck(vkCreateFence(context->device, &fenceInfo, nullptr, &fence),
+            "Failed to create in-flight fence");
+    inFlightFences[i] = fence;
   }
 
   createPerImageSemaphores();
@@ -101,9 +113,11 @@ void VulkanRenderer::createPerImageSemaphores() {
   semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
   for (size_t i = 0; i < swapchain->images.size(); i++) {
-    vkCheck(vkCreateSemaphore(context->device, &semaphoreInfo, nullptr,
-                              &renderFinishedSemaphores[i]),
-            "Failed to create render-finished semaphore");
+    VkSemaphore semaphore = VK_NULL_HANDLE;
+    vkCheck(
+        vkCreateSemaphore(context->device, &semaphoreInfo, nullptr, &semaphore),
+        "Failed to create render-finished semaphore");
+    renderFinishedSemaphores[i] = semaphore;
   }
 }
 
@@ -127,19 +141,27 @@ void VulkanRenderer::recreateImageAvailableSemaphores() {
   VkSemaphoreCreateInfo semaphoreInfo{};
   semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
   for (auto &semaphore : imageAvailableSemaphores) {
+    VkSemaphore recreated = VK_NULL_HANDLE;
     vkCheck(
-        vkCreateSemaphore(context->device, &semaphoreInfo, nullptr, &semaphore),
+        vkCreateSemaphore(context->device, &semaphoreInfo, nullptr, &recreated),
         "Failed to recreate image-available semaphore");
+    semaphore = recreated;
   }
 }
 
 void VulkanRenderer::createImGui() {
   // Pass the user's style + font callbacks into the constructor so they're
-  // re-applied if this runs again on a swap-chain rebuild (format/image-count
-  // change recreates the ImGui context, which would otherwise drop custom fonts
-  // and theme). Note the constructor does NOT initialise the ImGui backends —
-  // that is deferred to finalizeInit(), which Application::run() calls once the
-  // app has had a chance to register its callbacks.
+  // re-applied if this runs again on a swap-chain rebuild (a
+  // format/image-count/ min-image-count change recreates the ImGui context,
+  // which would otherwise drop custom fonts and theme). The constructor does
+  // NOT initialise the ImGui backends: the initial manager is finalised by
+  // Application::run(), and a manager rebuilt here is finalised by
+  // recreateSwapChain() before the app's swap-chain-recreated callback runs.
+  //
+  // textureSlots caps how many user textures the ImGui Vulkan backend can hold
+  // at once: each ImGui_ImplVulkan_AddTexture call consumes one slot, plus one
+  // for the font atlas. Raise this if an app needs more (the backend-owned
+  // descriptor pool is sized from it).
   //
   // On an sRGB swap-chain ImGui's sRGB-authored colours would wash out, so tell
   // the manager to linearise the built-in theme to match the format.
@@ -155,7 +177,9 @@ void VulkanRenderer::createImGui() {
 
 void VulkanRenderer::finalizeInit() {
   // The ImGui context exists by now (createImGui() built it), but its backends
-  // deliberately have not been initialised — see ImGuiManager::finalizeInit().
+  // deliberately have not been initialised yet — see
+  // ImGuiManager::finalizeInit(). Application::run() calls this for the initial
+  // manager; recreateSwapChain() calls it for every rebuilt one.
   if (imguiManager) {
     imguiManager->finalizeInit();
   }
@@ -415,6 +439,8 @@ void VulkanRenderer::recreateSwapChain() {
   // any of the three changing means teardown + rebuild; pure extent changes
   // are fine. The old render pass (if any) is held by
   // `res.oldRenderPassToDestroy` for us to destroy after ImGui is torn down.
+  // This flag is also reported to the app as
+  // SwapchainRecreateInfo::imguiContextRebuilt.
   const bool needFullImGuiRebuild =
       res.formatChanged || res.imageCountChanged ||
       swapchain->minImageCount != oldMinImageCount;
@@ -429,18 +455,26 @@ void VulkanRenderer::recreateSwapChain() {
 
   if (needFullImGuiRebuild) {
     createImGui();
+    // The constructor only creates the ImGui context; its GLFW + Vulkan
+    // backends must be up before the next frame records ImGui draw data, and
+    // before the app callback below (which may re-register ImGui textures via
+    // ImGui_ImplVulkan_AddTexture). Finalise it here, while the device is idle
+    // and before the new callback data is published.
+    imguiManager->finalizeInit();
   }
 
   // Recreate per-image render-finished semaphores for the new swap chain
   createPerImageSemaphores();
 
-  // Notify the app last — all new swap-chain state is in place and the device
-  // is still idle (vkDeviceWaitIdle above, no work submitted since), so the
-  // callback can safely destroy and rebuild format-/extent-dependent
-  // pipelines and resources.
+  // Notify the app last — all new swap-chain state is in place (including live
+  // ImGui backends when they were rebuilt) and the device is still idle
+  // (vkDeviceWaitIdle above, no work submitted since), so the callback can
+  // safely destroy and rebuild format-/extent-dependent pipelines and
+  // resources, and re-register ImGui textures when the context was rebuilt.
   if (swapchainRecreatedCallback) {
     swapchainRecreatedCallback({.formatChanged = res.formatChanged,
                                 .imageCountChanged = res.imageCountChanged,
+                                .imguiContextRebuilt = needFullImGuiRebuild,
                                 .extent = swapchain->extent});
   }
 }

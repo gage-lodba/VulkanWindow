@@ -4,7 +4,7 @@
 # 3.15), and target_link_options()/LINKER: below needs 3.13. Declaring less
 # only postpones the failure into one of those subdirectories' configure.
 cmake_minimum_required(VERSION 3.18)
-project(VulkanWindow VERSION 0.4.0)
+project(VulkanWindow VERSION 0.4.1)
 
 # True iff this CMakeLists is the top-level build, not a child of someone
 # else's add_subdirectory(). Used to gate settings that should only affect
@@ -43,12 +43,72 @@ option(VULKANWINDOW_BUILD_TESTS
   "Build the unit tests (fetches doctest via FetchContent). Requires CMake >= 3.18."
   OFF)
 # When ON, install rules are emitted AND glfw3 / VulkanMemoryAllocator are
-# resolved via find_package instead of the vendored submodules. Off by
-# default because the bundled-submodule build is the dev-friendly default;
-# installation is a vcpkg/Conan/system-packager concern.
+# resolved via find_package instead of their vendored submodules. Dear ImGui is
+# the exception: there is no system-package contract for it here, so the
+# bundled target is still compiled from deps/ImGui and installed with the
+# package. Off by default because the bundled-submodule build is the
+# dev-friendly default; installation is a vcpkg/Conan/system-packager concern.
 option(VULKANWINDOW_INSTALL
-  "Generate install rules. Requires find_package(glfw3, VulkanMemoryAllocator)."
+  "Generate install rules. Requires find_package(glfw3, VulkanMemoryAllocator); Dear ImGui is still built from deps/ImGui."
   OFF)
+# Turns the project's own strict warning set (see
+# vulkanwindow_apply_project_warnings below) into hard errors: -Werror with
+# GCC/Clang, /WX with MSVC. OFF by default so a plain checkout builds on a
+# newer compiler without forcing unrelated warning churn; CI enables it.
+option(VULKANWINDOW_WARNINGS_AS_ERRORS
+  "Treat the project's own compiler warnings (strict warning set) as errors"
+  OFF)
+
+# ---- Project warning / language policy -------------------------------------
+#
+# Applied to every target this project defines — library, demo, examples,
+# tests — and to nothing else:
+#   * PRIVATE compile options, so consumers of VulkanWindow::VulkanWindow do
+#     not inherit warning flags or -Werror;
+#   * third-party code (deps/GLFW, deps/ImGui, deps/VulkanMemoryAllocator) is
+#     not passed through this helper, and the bundled ImGui include
+#     directories are marked SYSTEM, so third-party headers included from our
+#     translation units don't emit warnings under our strict set;
+#   * CXX_EXTENSIONS OFF keeps the project on strict ISO C++20
+#     (-std=c++20, not gnu++20).
+function(vulkanwindow_apply_project_warnings target)
+  # Strict ISO C++20 for the project's own targets: -std=c++20, never gnu++20
+  # (CXX_EXTENSIONS OFF). CXX_STANDARD is stated explicitly so the compiler
+  # flag is emitted deterministically instead of depending on the compiler's
+  # default standard, and REQUIRED so an old toolchain fails loudly.
+  set_target_properties(${target} PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF)
+
+  if(MSVC)
+    # /W4 is the baseline warning level; /WX is the opt-in error upgrade.
+    target_compile_options(${target} PRIVATE /W4)
+    if(VULKANWINDOW_WARNINGS_AS_ERRORS)
+      target_compile_options(${target} PRIVATE /WX)
+    endif()
+  else()
+    target_compile_options(${target} PRIVATE
+      # Baseline.
+      -Wall
+      -Wextra
+      -Wpedantic
+      # Curated strict set: conversions, casts, object lifetime, formatting,
+      # and switch/override mistakes that a C++20 scaffold should not ship.
+      -Wconversion
+      -Wsign-conversion
+      -Wold-style-cast
+      -Wnon-virtual-dtor
+      -Wcast-align
+      -Wnull-dereference
+      -Wformat=2
+      -Wimplicit-fallthrough
+      -Woverloaded-virtual)
+    if(VULKANWINDOW_WARNINGS_AS_ERRORS)
+      target_compile_options(${target} PRIVATE -Werror)
+    endif()
+  endif()
+endfunction()
 
 # Vulkan
 find_package(Vulkan REQUIRED)
@@ -89,9 +149,13 @@ endif()
 # already brings its own ImGui (own add_library, FetchContent, etc.) can
 # provide it instead of getting duplicate-symbol link errors. If the parent
 # defines an `imgui` target before add_subdirectory'ing us, that target is
-# used as-is and must include the Vulkan and GLFW backends compatible with
-# our renderer (see ImGuiManager.cpp PipelineInfoMain usage — Dear ImGui
-# >= 1.92.4).
+# used as-is and must include the Vulkan and GLFW backends compatible with our
+# renderer. The hard floor is Dear ImGui 1.92.8: ImGuiManager.cpp needs
+# `PipelineInfoMain` (introduced in 1.92.4) and
+# `IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE` (introduced in 1.92.8,
+# where the Vulkan backend split combined-image-sampler descriptors into
+# separate sampled-image + sampler descriptors). Docking requires a
+# docking-branch build (IMGUI_HAS_DOCK).
 #
 # VULKANWINDOW_OWNS_IMGUI records whether we created that target ourselves.
 # Only a target this project defined may be installed/exported — a parent's
@@ -117,7 +181,13 @@ if(NOT TARGET imgui)
     # without reaching into the nested submodule path themselves.
     deps/ImGui/misc/cpp/imgui_stdlib.cpp
     deps/ImGui/misc/cpp/imgui_stdlib.h)
-  target_include_directories(imgui PUBLIC
+  # SYSTEM: the bundled ImGui is third-party code. Marking its include dirs as
+  # system means our strict warning set (in particular -Wold-style-cast and the
+  # conversion warnings) is not applied to the ImGui headers that our own
+  # translation units include; diagnostics from our TUs stay actionable.
+  # This is also exported to consumers through the build/install interfaces,
+  # which is desirable for the same reason.
+  target_include_directories(imgui SYSTEM PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/backends>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/deps/ImGui/misc/cpp>
@@ -127,6 +197,21 @@ if(NOT TARGET imgui)
   # Backends need GLFW headers and Vulkan; pinning these PUBLIC means
   # consumers linking imgui get the transitive deps for free.
   target_link_libraries(imgui PUBLIC glfw Vulkan::Vulkan)
+endif()
+
+# A parent-supplied imgui cannot be exported: install(TARGETS) rejects imported
+# and ALIAS targets, and a normal target defined by the parent is not in our
+# export set (CMake fails at generate time, or worse: our install rules would
+# silently skip the imgui archive, headers and link dependency). Fail with an
+# actionable message instead of producing an incomplete package.
+if(VULKANWINDOW_INSTALL AND NOT VULKANWINDOW_OWNS_IMGUI)
+  message(FATAL_ERROR
+    "VULKANWINDOW_INSTALL=ON requires VulkanWindow to build its bundled Dear "
+    "ImGui: an `imgui` target already exists in this build, so the generated "
+    "VulkanWindow package would be incomplete (no imgui archive, headers or "
+    "link dependency). Link the parent's imgui target directly and keep "
+    "VULKANWINDOW_INSTALL=OFF, or remove the parent's imgui target before "
+    "add_subdirectory'ing VulkanWindow so the bundled copy is used.")
 endif()
 
 # Library sources
@@ -161,7 +246,8 @@ set(lib_sources
 # Static library target. The target is named `VulkanWindow`; consumers
 # should reference it via the namespaced alias `VulkanWindow::VulkanWindow`
 # so the same call site works whether the lib was pulled in via
-# add_subdirectory, FetchContent, or (in the future) an installed package.
+# add_subdirectory, FetchContent, or an installed package
+# (VULKANWINDOW_INSTALL=ON).
 add_library(VulkanWindow STATIC)
 add_library(VulkanWindow::VulkanWindow ALIAS VulkanWindow)
 
@@ -196,12 +282,9 @@ target_link_libraries(VulkanWindow PUBLIC
 # without us forcing CMAKE_CXX_STANDARD on the parent project.
 target_compile_features(VulkanWindow PUBLIC cxx_std_20)
 
-# Compiler warnings
-if(MSVC)
-  target_compile_options(VulkanWindow PRIVATE /W4)
-else()
-  target_compile_options(VulkanWindow PRIVATE -Wall -Wextra -Wpedantic)
-endif()
+# Strict project warnings + optional warnings-as-errors (see the helper above).
+# PRIVATE, so nothing here leaks into consumers of VulkanWindow::VulkanWindow.
+vulkanwindow_apply_project_warnings(VulkanWindow)
 
 # Optional best-practices validation (read by VulkanRenderer.h to enable
 # VK_VALIDATION_FEATURE_ENABLE_BEST_PRACTICES_EXT in Debug builds).
@@ -216,6 +299,7 @@ if(VULKANWINDOW_BUILD_DEMO)
   add_executable(VulkanWindowDemo source/main.cpp)
   set_target_properties(VulkanWindowDemo PROPERTIES OUTPUT_NAME VulkanWindow)
   target_link_libraries(VulkanWindowDemo PRIVATE VulkanWindow::VulkanWindow)
+  vulkanwindow_apply_project_warnings(VulkanWindowDemo)
 
   # Hide console window in release builds on Windows
   if(WIN32)
@@ -232,6 +316,15 @@ endif()
 if(VULKANWINDOW_BUILD_EXAMPLES)
   add_subdirectory(examples/triangle)
   add_subdirectory(examples/textured_quad)
+  # The examples' own CMakeLists keep their baseline warning level; apply the
+  # project-wide strict set here (guarded because either example skips itself
+  # when glslc is missing).
+  if(TARGET VulkanWindowTriangle)
+    vulkanwindow_apply_project_warnings(VulkanWindowTriangle)
+  endif()
+  if(TARGET VulkanWindowTexturedQuad)
+    vulkanwindow_apply_project_warnings(VulkanWindowTexturedQuad)
+  endif()
 endif()
 
 # Unit tests (off by default; see VULKANWINDOW_BUILD_TESTS above). enable_testing
@@ -239,6 +332,25 @@ endif()
 if(VULKANWINDOW_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+  if(TARGET VulkanWindowTests)
+    vulkanwindow_apply_project_warnings(VulkanWindowTests)
+    # doctest (third-party test framework) uses __COUNTER__ in its macros and
+    # includes <ciso646>, which libstdc++ >= 16 marks with a #warning. Clang >= 22
+    # reports those as -Wc2y-extensions / -W#warnings, which -Werror would turn
+    # into failures from third-party code. Suppress exactly those two diagnostics
+    # on the test target when using an upstream Clang new enough to emit them;
+    # GCC, older Clang, and AppleClang do not. The library/demo/example targets
+    # keep the full strict set.
+    if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 22)
+      target_compile_options(VulkanWindowTests PRIVATE
+        -Wno-c2y-extensions
+        "-Wno-#warnings")
+    endif()
+  endif()
+  if(TARGET VulkanWindowSwapchainRecreation)
+    vulkanwindow_apply_project_warnings(VulkanWindowSwapchainRecreation)
+  endif()
 endif()
 
 # ---- Install / export -------------------------------------------------------
@@ -259,7 +371,12 @@ endif()
 # Vulkan, glfw3, and VulkanMemoryAllocator — those must be findable on the
 # consumer's CMAKE_PREFIX_PATH (typically supplied by vcpkg/Conan or system
 # packages). GLFW and VMA are NOT installed by us, since they're third-party
-# submodules with their own versioning.
+# submodules with their own versioning. Dear ImGui is the exception: it has no
+# system-package contract here, so the bundled static library and headers are
+# built from deps/ImGui and installed with this package (the ImGui submodule is
+# therefore still required to produce an install tree). A parent-supplied
+# `imgui` target is rejected at configure time above, because only a target
+# this project owns can be exported into the package.
 if(VULKANWINDOW_INSTALL)
   include(GNUInstallDirs)
   include(CMakePackageConfigHelpers)
@@ -274,11 +391,10 @@ if(VULKANWINDOW_INSTALL)
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/VulkanWindow)
 
   # imgui is a separate target (it has its own headers) but lives in the same
-  # export set so a single find_package call brings both in. Only when this
-  # project created it, though: install(TARGETS) rejects an imported or ALIAS
-  # target, and a parent-supplied imgui belongs to the parent (it either has
-  # its own install rules or came from find_package), so it is not ours to
-  # re-export.
+  # export set so a single find_package call brings both in. With INSTALL=ON the
+  # configure-time guard above has already established that we own the target
+  # (a parent-supplied imgui would make the package incomplete), so this is the
+  # bundled target this project defined and is ours to export.
   if(VULKANWINDOW_OWNS_IMGUI)
     install(TARGETS imgui
       EXPORT VulkanWindowTargets

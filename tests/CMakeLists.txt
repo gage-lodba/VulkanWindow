@@ -20,8 +20,11 @@ FetchContent_MakeAvailable(doctest)
 
 add_library(doctest INTERFACE)
 add_library(doctest::doctest ALIAS doctest)
-# The header is at <doctest/doctest.h> relative to the repo root.
-target_include_directories(doctest INTERFACE ${doctest_SOURCE_DIR})
+# The header is at <doctest/doctest.h> relative to the repo root. SYSTEM: doctest
+# is third-party code, so its headers must not leak diagnostics into our TUs
+# under the project's strict warning set (-Wall -Wextra -Wpedantic + curated
+# strict flags + -Werror). Our own test sources keep the full strict set.
+target_include_directories(doctest SYSTEM INTERFACE ${doctest_SOURCE_DIR})
 
 add_executable(VulkanWindowTests
   test_main.cpp
@@ -43,3 +46,14 @@ target_include_directories(VulkanWindowTests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR})
 
 add_test(NAME VulkanWindowUnitTests COMMAND VulkanWindowTests)
+
+# Swap-chain-recreation smoke binary (B1 regression). It needs a real
+# window/display and the full GPU path, so it is deliberately NOT registered
+# with ctest: the smoke CI job runs the binary directly in a Debug build with
+# VULKANWINDOW_MAX_FRAMES=40 and VULKANWINDOW_VALIDATION_ABORT=1 and expects
+# "recreation smoke OK" on stdout plus a zero exit status.
+add_executable(VulkanWindowSwapchainRecreation
+  test_swapchain_recreation.cpp)
+
+target_link_libraries(VulkanWindowSwapchainRecreation PRIVATE
+  VulkanWindow::VulkanWindow)

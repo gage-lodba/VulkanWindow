@@ -73,33 +73,46 @@ struct PipelineCacheHeader {
     -> std::filesystem::path;
 
 /// Path of the pipeline-cache file for `appName` under defaultCacheDir(),
-/// falling back to the current working directory when no platform location is
-/// available.
+/// falling back to `<current working directory>/<appName>/pipeline_cache.bin`
+/// when no platform cache location is available (the app-name segment keeps
+/// apps from sharing one file even in the fallback).
 [[nodiscard]] auto defaultPipelineCachePath(const std::string &appName)
     -> std::filesystem::path;
 
 /// Remove abandoned temp files (the "<name>.tmp.<pid>" siblings written by
 /// writeFileAtomically) left by a process killed between write and rename.
 /// Only removes temps older than `staleAfter` so a concurrently-running
-/// instance mid-write isn't disturbed. Best-effort: every error is swallowed,
-/// and a missing/unreadable directory is not an error.
+/// instance mid-write isn't disturbed. For a bare relative `target`
+/// (parent_path() empty) the temp files live beside it in the current working
+/// directory, so the sweep runs there instead of being skipped. Best-effort:
+/// every error is swallowed, and a missing/unreadable directory is not an
+/// error.
 void sweepStaleTemps(const std::filesystem::path &target,
                      std::chrono::seconds staleAfter = std::chrono::minutes(1));
 
 /// Write `data` to `path` crash-safely: create the parent directory, write to
 /// a PID-suffixed sibling temp file, flush it to disk, then rename over `path`.
+/// The PID suffix makes concurrent *processes* safe; two threads of the same
+/// process racing to write the same path would share a temp name and are not
+/// supported (see PipelineCacheStore's thread-safety note).
 /// A kill mid-write therefore leaves either the old file or the new one, never
 /// a truncated file — which matters because a truncated cache fails the header
 /// check on the next run and silently costs a full pipeline recompile.
 ///
-/// That guarantee is structural: it holds because the write goes to a temp file
-/// and is published by rename. It is deliberately NOT asserted by a test. There
-/// is no portable deterministic way to distinguish this from a direct write —
-/// blocking the temp path, a read-only target, and an exclusive lock all fail
-/// for both — and a threaded observer is too flaky to be worth keeping. The
-/// tests cover the observable contract (exact contents, no stale tail, no
-/// surviving temp); anything that changes the temp-then-rename shape here
-/// changes an untested property, so keep that in mind when editing this.
+/// "Flush it to disk" is real on both platforms: fsync on POSIX and
+/// FlushFileBuffers via _commit on Windows. The parent directory entry is
+/// fsynced on POSIX; Windows relies on filesystem metadata journaling for the
+/// rename. If the file flush fails the temp file is removed and false is
+/// returned rather than publishing a blob of unknown durability.
+///
+/// That crash-safety guarantee is structural: it holds because the write goes
+/// to a temp file and is published by rename. It is deliberately NOT asserted
+/// by a test. There is no portable deterministic way to distinguish this from a
+/// direct write — blocking the temp path, a read-only target, and an exclusive
+/// lock all fail for both — and a threaded observer is too flaky to be worth
+/// keeping. The tests cover the observable contract (exact contents, no stale
+/// tail, no surviving temp); anything that changes the temp-then-rename shape
+/// here changes an untested property, so keep that in mind when editing this.
 ///
 /// Returns false on any failure, having cleaned up its temp file; persistence
 /// is best-effort and a false return is never fatal.
@@ -113,6 +126,11 @@ void sweepStaleTemps(const std::filesystem::path &target,
 
 /// Persistence for one pipeline-cache file. Holds no Vulkan handles, so it can
 /// be constructed and exercised without a device.
+///
+/// Thread-safety: load()/save() are not internally synchronized. Call them from
+/// one thread at a time (the scaffold loads during context init and saves
+/// during shutdown); concurrent processes writing the same path are supported
+/// by the PID-suffixed temp-file write.
 class PipelineCacheStore {
  public:
   /// `cacheFile` is the path of the cache blob itself (see

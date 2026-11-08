@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <stdexcept>
 
 #include "VulkanDescriptors.h"
 #include "VulkanResources.h"
@@ -73,6 +74,62 @@ TEST_CASE("createDescriptorPool with multiple pool sizes") {
   vkDestroyDescriptorPool(fx.device, pool, nullptr);
 }
 
+TEST_CASE("createDescriptorPool rejects maxSets == 0") {
+  VulkanTestFixture fx;
+  if (!fx) return;
+
+  // VUID-VkDescriptorPoolCreateInfo-maxSets-00301 requires maxSets > 0; the
+  // helper turns that into an actionable exception before calling Vulkan.
+  CHECK_THROWS_AS(
+      (void)vkutil::createDescriptorPool(
+          fx.device, {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}}, /*maxSets=*/0),
+      std::invalid_argument);
+}
+
+TEST_CASE("createDescriptorPool sizes for maxSets sets") {
+  VulkanTestFixture fx;
+  if (!fx) return;
+
+  VkDescriptorSetLayout layout = vkutil::createDescriptorSetLayout(
+      fx.device,
+      {{0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT}});
+  // The pool has enough descriptors for two one-descriptor sets, and maxSets
+  // says two: exactly two allocations must succeed.
+  VkDescriptorPool pool = vkutil::createDescriptorPool(
+      fx.device, {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2}}, /*maxSets=*/2);
+
+  VkDescriptorSet first =
+      vkutil::allocateDescriptorSet(fx.device, pool, layout);
+  VkDescriptorSet second =
+      vkutil::allocateDescriptorSet(fx.device, pool, layout);
+  CHECK(first != VK_NULL_HANDLE);
+  CHECK(second != VK_NULL_HANDLE);
+
+  // Exhausting the pool is a normal, spec-sanctioned runtime failure
+  // (VK_ERROR_OUT_OF_POOL_MEMORY), which allocateDescriptorSet() reports via
+  // vkCheck's std::runtime_error. Some drivers (notably Mesa lavapipe, the
+  // Linux CI ICD) do not enforce descriptor-pool limits and hand out a third
+  // set; tolerate that driver laxity here instead of failing the suite on a
+  // driver bug — the error-propagation contract is still asserted wherever the
+  // driver enforces the limit.
+  bool exhaustionReported = false;
+  try {
+    VkDescriptorSet third =
+        vkutil::allocateDescriptorSet(fx.device, pool, layout);
+    vkFreeDescriptorSets(fx.device, pool, 1, &third);
+  } catch (const std::runtime_error &) {
+    exhaustionReported = true;
+  }
+  if (!exhaustionReported) {
+    MESSAGE(
+        "driver did not enforce descriptor-pool limits; pool-exhaustion "
+        "assertion skipped");
+  }
+
+  vkDestroyDescriptorPool(fx.device, pool, nullptr);
+  vkDestroyDescriptorSetLayout(fx.device, layout, nullptr);
+}
+
 // -----------------------------------------------------------------------------
 // allocateDescriptorSet
 // -----------------------------------------------------------------------------
@@ -99,7 +156,7 @@ TEST_CASE("allocateDescriptorSet returns a set for the layout") {
 // updateBufferDescriptor
 // -----------------------------------------------------------------------------
 
-TEST_CASE("updateBufferDescriptor writes a descriptor for a mapped buffer") {
+TEST_CASE("updateBufferDescriptor is accepted for a mapped uniform buffer") {
   VulkanTestFixture fx;
   if (!fx) return;
 
@@ -114,6 +171,12 @@ TEST_CASE("updateBufferDescriptor writes a descriptor for a mapped buffer") {
       fx.device, {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1}}, /*maxSets=*/1);
   VkDescriptorSet set = vkutil::allocateDescriptorSet(fx.device, pool, layout);
 
+  // Coverage limit, stated plainly: a descriptor write has no host-visible
+  // result. Its effect is only observable through a draw/sample; the examples
+  // exercise that path under the validation layer (CI smoke jobs). What this
+  // case can honestly assert is that the write the helper records is accepted
+  // by the driver — and, in the validation-enabled CI run, that it is valid
+  // usage.
   CHECK_NOTHROW(
       vkutil::updateBufferDescriptor(fx.device, set, 0, buf.buffer, buf.size));
 
@@ -153,7 +216,7 @@ TEST_CASE("updateBufferDescriptor with explicit type and offset") {
 // -----------------------------------------------------------------------------
 
 TEST_CASE(
-    "updateImageSamplerDescriptor writes a combined image sampler descriptor") {
+    "updateImageSamplerDescriptor is accepted for a texture and sampler pair") {
   VulkanTestFixture fx;
   if (!fx) return;
 
@@ -177,6 +240,8 @@ TEST_CASE(
       /*maxSets=*/1);
   VkDescriptorSet set = vkutil::allocateDescriptorSet(fx.device, pool, layout);
 
+  // Same coverage limit as updateBufferDescriptor: no host-visible result, so
+  // this asserts driver acceptance / valid usage, not sampled output.
   CHECK_NOTHROW(vkutil::updateImageSamplerDescriptor(fx.device, set, 0,
                                                      tex.view, sampler));
 
